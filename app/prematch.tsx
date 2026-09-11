@@ -67,10 +67,6 @@ export function Prematch({
     [officials, setOfficials] = useState<Official[]>(defaultOfficials),
     [stage, setStage] = useState<"pool" | "final">("pool"),
     [agreement, setAgreement] = useState({ home: false, away: false }),
-    [pendingTeam, setPendingTeam] = useState<{
-      side: "home" | "away";
-      id: string;
-    } | null>(null),
     [confirmStart, setConfirmStart] = useState<ClubState | null>(null);
   useEffect(
     () =>
@@ -83,7 +79,7 @@ export function Prematch({
   const base = state.players.map((p) => ({
     ...p,
     ...edits[p.id],
-    license: p.license ?? edits[p.id]?.license,
+    license: p.license ?? edits[p.id]?.license ?? "never",
   }));
   const own = base.filter(
     (p) =>
@@ -100,12 +96,12 @@ export function Prematch({
           ? {
               ...p,
               name: original.name,
-              license: original.license ?? p.license,
+              license: original.license ?? p.license ?? "never",
               limited: original.limited,
               cap: original.cap,
               sourceTeamId: original.teamId,
             }
-          : p;
+          : { ...p, license: p.license ?? "never" };
       }),
   ];
   const selected = all.filter((p) => !absent.includes(p.id));
@@ -135,11 +131,8 @@ export function Prematch({
       toast.error("Choisissez deux équipes différentes.");
       return;
     }
-    if (!(side === "home" ? home : away)) {
-      side === "home" ? setHome(id) : setAway(id);
-      return;
-    }
-    setPendingTeam({ side, id });
+    side === "home" ? setHome(id) : setAway(id);
+    setAgreement((previous) => ({ ...previous, [side]: false }));
   }
   function teamPanel(teamId: string, side: "home" | "away") {
     const team = matchTeam(teamId, side),
@@ -445,52 +438,61 @@ export function Prematch({
           </span>
         </div>
         <div className="fixture-details">
-          <Field label="Date du match">
-            <div className="schedule-input">
-              <CalendarDays size={18} />
-              <input
-                type="date"
-                required
-                value={schedule.date}
-                onChange={(e) =>
-                  setSchedule({ ...schedule, date: e.target.value })
-                }
+          <div className="fixture-schedule">
+            <Field label="Date du match">
+              <div className="schedule-input">
+                <CalendarDays size={18} />
+                <input
+                  type="date"
+                  required
+                  value={schedule.date}
+                  onChange={(e) =>
+                    setSchedule({ ...schedule, date: e.target.value })
+                  }
+                />
+              </div>
+            </Field>
+            <Field label="Heure prévue">
+              <div className="schedule-input">
+                <Clock3 size={18} />
+                <input
+                  type="time"
+                  required
+                  value={schedule.time}
+                  onChange={(e) =>
+                    setSchedule({ ...schedule, time: e.target.value })
+                  }
+                />
+              </div>
+            </Field>
+          </div>
+          <div className="fixture-options">
+            <Field label="Phase">
+              <Picker
+                label="Phase du tournoi"
+                value={stage}
+                onChange={(v) => setStage(v as typeof stage)}
+                options={[
+                  { value: "pool", label: "Poules · pénalités activées" },
+                  { value: "final", label: "Phase finale · sans pénalités" },
+                ]}
               />
-            </div>
-          </Field>
-          <Field label="Heure prévue">
-            <div className="schedule-input">
-              <Clock3 size={18} />
-              <input
-                type="time"
-                required
-                value={schedule.time}
-                onChange={(e) =>
-                  setSchedule({ ...schedule, time: e.target.value })
-                }
-              />
-            </div>
-          </Field>
-          <Field label="Phase">
-            <Picker
-              label="Phase du tournoi"
-              value={stage}
-              onChange={(v) => setStage(v as typeof stage)}
-              options={[
-                { value: "pool", label: "Poules · pénalités activées" },
-                { value: "final", label: "Phase finale · sans pénalités" },
-              ]}
-            />
-          </Field>
-          <button
-            className="button secondary"
-            onClick={() =>
-              setTeamDraft({ id: uid(), name: "", short: "", color: "#92c5ed" })
-            }
-          >
-            <Plus size={16} />
-            Nouvelle équipe
-          </button>
+            </Field>
+            <button
+              className="button secondary"
+              onClick={() =>
+                setTeamDraft({
+                  id: uid(),
+                  name: "",
+                  short: "",
+                  color: "#92c5ed",
+                })
+              }
+            >
+              <Plus size={16} />
+              Nouvelle équipe
+            </button>
+          </div>
         </div>
         {h && a && h.color === a.color && (
           <p className="kit-warning">
@@ -626,20 +628,6 @@ export function Prematch({
             <button className="button primary">Créer</button>
           </form>
         </Modal>
-      )}
-      {pendingTeam && (
-        <Confirm
-          title="Changer l’équipe de cette préparation ?"
-          description="Les sélections de l’équipe remplacée seront écartées de cette préparation. Aucun match enregistré, score ou chronomètre ne sera remis à zéro."
-          onClose={() => setPendingTeam(null)}
-          onConfirm={() => {
-            pendingTeam.side === "home"
-              ? setHome(pendingTeam.id)
-              : setAway(pendingTeam.id);
-            setAgreement((x) => ({ ...x, [pendingTeam.side]: false }));
-            setPendingTeam(null);
-          }}
-        />
       )}
       {confirmStart && (
         <Confirm

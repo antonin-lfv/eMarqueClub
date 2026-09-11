@@ -2969,3 +2969,77 @@ html.light {
 .light .chosen-mode {
   color: var(--primary) !important;
 }
+
+/* Même grille pour les équipes, l’horaire et les listes de joueurs. */
+.prematch .fixture-teams,
+.prematch .fixture-details,
+.prematch .setup-teams {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 64px;
+}
+.prematch .fixture-versus {
+  width: 36px;
+  height: 36px;
+}
+.fixture-schedule {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: end;
+  min-width: 0;
+}
+.fixture-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: end;
+  min-width: 0;
+}
+.fixture-details .field {
+  margin: 0;
+}
+.fixture-details .picker,
+.fixture-details .schedule-input,
+.fixture-details .button {
+  min-height: 44px;
+}
+.fixture-details .schedule-input input {
+  min-height: 42px;
+}
+@media (max-width: 1050px) {
+  .prematch .fixture-teams,
+  .prematch .fixture-details,
+  .prematch .setup-teams {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .prematch .fixture-teams {
+    row-gap: 14px;
+  }
+  .prematch .fixture-team-card:nth-child(2) {
+    grid-row: 3;
+  }
+  .prematch .fixture-versus {
+    position: static;
+    transform: none;
+    grid-row: 2;
+    justify-self: center;
+    margin: 0;
+  }
+  .prematch .fixture-details {
+    row-gap: 20px;
+  }
+  .prematch .setup-teams {
+    row-gap: 22px;
+  }
+}
+@media (max-width: 560px) {
+  .fixture-schedule {
+    gap: 12px;
+  }
+  .fixture-options {
+    grid-template-columns: 1fr;
+  }
+  .fixture-options > .button {
+    justify-self: end;
+  }
+}

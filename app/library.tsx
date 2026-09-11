@@ -44,14 +44,17 @@ export function PlayerForm({
   busy: boolean;
 }) {
   const [p, setP] = useState<Player>(
-    initial ?? {
-      id: uid(),
-      name: "",
-      number: null,
-      teamId: teamId ?? state.teams[0]?.id ?? "",
-      limited: false,
-      cap: null,
-    },
+    initial
+      ? { ...initial, license: initial.license ?? "never" }
+      : {
+          id: uid(),
+          name: "",
+          number: null,
+          teamId: teamId ?? state.teams[0]?.id ?? "",
+          license: "never",
+          limited: false,
+          cap: null,
+        },
   );
   return (
     <form

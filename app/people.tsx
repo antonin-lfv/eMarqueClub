@@ -236,7 +236,7 @@ export function AddRosterPlayer({
   const [mode, setMode] = useState("existing"),
     [chosen, setChosen] = useState<Player | null>(null),
     [number, setNumber] = useState<number | null>(null),
-    [license, setLicense] = useState<Player["license"]>(),
+    [license, setLicense] = useState<Player["license"]>("never"),
     [extra, setExtra] = useState(false);
   const available = state.players.filter(
     (p) =>
@@ -271,7 +271,7 @@ export function AddRosterPlayer({
             onSelect={(p) => {
               setChosen(p);
               setNumber(p?.number ?? null);
-              setLicense(p?.license);
+              setLicense(p?.license ?? "never");
             }}
           />
           {chosen && (
