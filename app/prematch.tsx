@@ -320,12 +320,63 @@ export function Prematch({
           <h2>Avant-match</h2>
           <p>Présents, maillots, licences et officiels.</p>
         </div>
+        <button
+          className="button secondary"
+          onClick={() =>
+            setTeamDraft({ id: uid(), name: "", short: "", color: "#92c5ed" })
+          }
+        >
+          <Plus size={16} />
+          Nouvelle équipe
+        </button>
         {canCancel && (
           <button className="button secondary" onClick={onCancel}>
             Retour au match
           </button>
         )}
       </div>
+      <section
+        className="panel match-metadata"
+        aria-label="Informations de la rencontre"
+      >
+        <Field label="Date du match">
+          <div className="schedule-input">
+            <CalendarDays size={18} />
+            <input
+              type="date"
+              required
+              value={schedule.date}
+              onChange={(e) =>
+                setSchedule({ ...schedule, date: e.target.value })
+              }
+            />
+          </div>
+        </Field>
+        <Field label="Heure prévue">
+          <div className="schedule-input">
+            <Clock3 size={18} />
+            <input
+              type="time"
+              required
+              value={schedule.time}
+              onChange={(e) =>
+                setSchedule({ ...schedule, time: e.target.value })
+              }
+            />
+          </div>
+        </Field>
+        <Field label="Phase">
+          <Picker
+            label="Phase du tournoi"
+            value={stage}
+            onChange={(v) => setStage(v as typeof stage)}
+            options={[
+              { value: "pool", label: "Poules · pénalités activées" },
+              { value: "final", label: "Phase finale · sans pénalités" },
+            ]}
+          />
+        </Field>
+      </section>
       <section className="fixture-builder">
         <div className="fixture-teams">
           {(["home", "away"] as const).map((side) => {
@@ -436,63 +487,6 @@ export function Prematch({
           <span className="fixture-versus" aria-hidden="true">
             VS
           </span>
-        </div>
-        <div className="fixture-details">
-          <div className="fixture-schedule">
-            <Field label="Date du match">
-              <div className="schedule-input">
-                <CalendarDays size={18} />
-                <input
-                  type="date"
-                  required
-                  value={schedule.date}
-                  onChange={(e) =>
-                    setSchedule({ ...schedule, date: e.target.value })
-                  }
-                />
-              </div>
-            </Field>
-            <Field label="Heure prévue">
-              <div className="schedule-input">
-                <Clock3 size={18} />
-                <input
-                  type="time"
-                  required
-                  value={schedule.time}
-                  onChange={(e) =>
-                    setSchedule({ ...schedule, time: e.target.value })
-                  }
-                />
-              </div>
-            </Field>
-          </div>
-          <div className="fixture-options">
-            <Field label="Phase">
-              <Picker
-                label="Phase du tournoi"
-                value={stage}
-                onChange={(v) => setStage(v as typeof stage)}
-                options={[
-                  { value: "pool", label: "Poules · pénalités activées" },
-                  { value: "final", label: "Phase finale · sans pénalités" },
-                ]}
-              />
-            </Field>
-            <button
-              className="button secondary"
-              onClick={() =>
-                setTeamDraft({
-                  id: uid(),
-                  name: "",
-                  short: "",
-                  color: "#92c5ed",
-                })
-              }
-            >
-              <Plus size={16} />
-              Nouvelle équipe
-            </button>
-          </div>
         </div>
         {h && a && h.color === a.color && (
           <p className="kit-warning">

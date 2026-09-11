@@ -246,6 +246,12 @@ export function attackingRight(m: Match, teamId: string) {
   const secondHalf = m.period > Math.ceil(m.rules.periods / 2);
   return (teamId === m.away.id) !== (secondHalf !== m.swapped);
 }
+// Scoreboard, rosters and court labels share the exact same orientation.
+export function courtSides(m: Match): { left: Team; right: Team } {
+  return attackingRight(m, m.home.id)
+    ? { left: m.away, right: m.home }
+    : { left: m.home, right: m.away };
+}
 export function shotValue(m: Match, teamId: string, x: number, y: number) {
   const dx = attackingRight(m, teamId) ? 28 - x : x;
   return y <= 0.9 || y >= 14.1 || Math.hypot(dx - 1.575, y - 7.5) >= 6.75

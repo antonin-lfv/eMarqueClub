@@ -8,6 +8,9 @@ import {
   localMatchDateTime,
   scheduledMatchTime,
   matchDateLabel,
+  courtSides,
+  teamFouls,
+  startingPoints,
   removeDemo,
   prepareMatch,
   calculateStartingScore,
@@ -495,5 +498,69 @@ describe("Maillots et horaire de rencontre", () => {
     m.scheduledAt = new Date(2026, 8, 12, 19, 30).toISOString();
     assert.match(matchDateLabel(m), /12\/09\/2026/);
     assert.match(matchDateLabel(m), /19:30/);
+  });
+});
+
+describe("Côtés de toute la table", () => {
+  it("swaps the displayed teams without transferring scores, fouls, rosters or the clock", () => {
+    let m = setup().matches[0];
+    m = addEvent(m, basket());
+    m = addEvent(m, {
+      kind: "foul",
+      teamId: "aigles",
+      playerId: "demo-0",
+      foulType: "Personnelle",
+    });
+    const original = structuredClone(m),
+      first = courtSides(m);
+    assert.equal(first.left.id, "aigles");
+    m = { ...m, swapped: !m.swapped };
+    const swapped = courtSides(m);
+    assert.equal(swapped.left.id, "renards");
+    assert.equal(swapped.right.id, "aigles");
+    assert.equal(score(m, swapped.right.id), 5);
+    assert.equal(startingPoints(m, swapped.right.id), 3);
+    assert.equal(teamFouls(m, swapped.right.id), 1);
+    assert.equal(shotValue(m, swapped.left.id, 2, 7.5), 2);
+    assert.equal(shotValue(m, swapped.right.id, 26, 7.5), 2);
+    assert.deepEqual(m.players, original.players);
+    assert.deepEqual(m.events, original.events);
+    assert.equal(m.remaining, original.remaining);
+    assert.equal(m.runningUntil, original.runningUntil);
+    assert.deepEqual(courtSides({ ...m, swapped: false }), first);
+  });
+  it("automatically changes all display sides at halftime in two- and four-period matches, including a manual inversion", () => {
+    for (const periods of [2, 4])
+      for (const swapped of [false, true]) {
+        let m = setup().matches[0];
+        m.rules = { ...m.rules, periods };
+        m.swapped = swapped;
+        const first = courtSides(m);
+        if (periods === 4) {
+          m = nextPeriod({ ...m, remaining: 0 });
+          assert.deepEqual(courtSides(m), first);
+        }
+        m = nextPeriod({ ...m, remaining: 0 });
+        assert.equal(courtSides(m).left.id, first.right.id);
+        assert.equal(courtSides(m).right.id, first.left.id);
+        assert.equal(m.swapped, swapped);
+        assert.equal(m.remaining, 600);
+      }
+  });
+  it("keeps the second-half orientation throughout overtime and after reloading", () => {
+    let m = setup().matches[0];
+    m.period = 2;
+    m.remaining = 0;
+    m.startingScore = { home: 0, away: 0 };
+    const secondHalf = courtSides(m);
+    m = nextPeriod(m);
+    assert.deepEqual(courtSides(m), secondHalf);
+    m = nextPeriod({ ...m, remaining: 0 });
+    assert.deepEqual(courtSides(m), secondHalf);
+    const state = setup();
+    state.matches = [m];
+    state.activeId = m.id;
+    const restored = stateSchema.parse(JSON.parse(JSON.stringify(state)));
+    assert.deepEqual(courtSides(restored.matches[0]), secondHalf);
   });
 });

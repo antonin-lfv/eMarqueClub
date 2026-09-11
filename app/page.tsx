@@ -40,7 +40,8 @@ import {
   addEvent,
   nextPeriod,
   shotValue,
-  attackingRight,
+  courtSides,
+  startingPoints,
   teamFouls,
   eventLabels,
   adjustClock,
@@ -258,7 +259,7 @@ export default function Home() {
                     : tab === "setup"
                       ? "Préparer la rencontre"
                       : m
-                        ? matchLabel(m)
+                        ? `${courtSides(m).left.name} — ${courtSides(m).right.name}`
                         : "Prêt pour le prochain match ?"}
             </h1>
             {m && tab === "live" && (
@@ -753,6 +754,7 @@ function LiveTable({
     return (
       <section
         className="roster"
+        key={team.id}
         style={{ color: `color-mix(in srgb, ${color} 30%, var(--foreground))` }}
       >
         <div className="roster-title">
@@ -812,11 +814,12 @@ function LiveTable({
     [m.home.id]: teamColor(m.home),
     [m.away.id]: teamColor(m.away, "#f2a58c"),
   };
+  const sides = courtSides(m);
   const notices = matchWarnings(m);
   return (
     <>
       <section className="scoreboard">
-        {[m.home, null, m.away].map((team, i) =>
+        {[sides.left, null, sides.right].map((team, i) =>
           team ? (
             <div
               key={team.id}
@@ -838,7 +841,9 @@ function LiveTable({
                 <Shield />
               </div>
               <div>
-                <small>{i === 0 ? "DOMICILE" : "EXTÉRIEUR"}</small>
+                <small>
+                  {team.id === m.home.id ? "DOMICILE" : "EXTÉRIEUR"}
+                </small>
                 <h2>{team.name}</h2>
                 <span>
                   Fautes <b>{teamFouls(m, team.id)}</b>
@@ -929,7 +934,8 @@ function LiveTable({
         )}
       </section>
       <div className="starting-notice">
-        Départ : {m.startingScore?.home ?? 0}–{m.startingScore?.away ?? 0} ·{" "}
+        Départ : {sides.left.name} {startingPoints(m, sides.left.id)}–
+        {startingPoints(m, sides.right.id)} {sides.right.name} ·{" "}
         {m.stage === "final" ? "Phase finale, sans pénalités" : "Poules"}
       </div>
       <div className="match-command-bar">
@@ -1011,7 +1017,7 @@ function LiveTable({
         </div>
       </div>
       <div className="live-grid">
-        {teamPanel(m.home, colors[m.home.id])}
+        {teamPanel(sides.left, colors[sides.left.id])}
         <section className="play-panel">
           <div className="panel-heading">
             <h2>
@@ -1035,26 +1041,8 @@ function LiveTable({
           </div>
           <div className="court-wrap">
             <div className="court-caption">
-              <span
-                style={{
-                  color:
-                    colors[
-                      attackingRight(m, m.home.id) ? m.away.id : m.home.id
-                    ],
-                }}
-              >
-                ← {attackingRight(m, m.home.id) ? m.away.name : m.home.name}
-              </span>
-              <span
-                style={{
-                  color:
-                    colors[
-                      attackingRight(m, m.home.id) ? m.home.id : m.away.id
-                    ],
-                }}
-              >
-                {attackingRight(m, m.home.id) ? m.home.name : m.away.name} →
-              </span>
+              <span>← {sides.left.name}</span>
+              <span>{sides.right.name} →</span>
             </div>
             <Court
               onShot={
@@ -1164,7 +1152,7 @@ function LiveTable({
               : "Les positions des paniers sont conservées. Annuler ne modifie ni le chrono ni le score de départ."}
           </div>
         </section>
-        {teamPanel(m.away, colors[m.away.id])}
+        {teamPanel(sides.right, colors[sides.right.id])}
       </div>
       <section className="history">
         <div className="panel-heading">

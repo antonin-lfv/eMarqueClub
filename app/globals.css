@@ -3043,3 +3043,35 @@ html.light {
     justify-self: end;
   }
 }
+
+.match-metadata {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 24px;
+  align-items: end;
+  margin-bottom: 28px;
+}
+.match-metadata .field {
+  margin: 0;
+}
+.match-metadata .picker,
+.match-metadata .schedule-input {
+  min-height: 44px;
+}
+.match-metadata .schedule-input input {
+  min-height: 42px;
+}
+@media (max-width: 760px) {
+  .match-metadata {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 18px;
+  }
+  .match-metadata > .field:last-child {
+    grid-column: 1/-1;
+  }
+}
+@media (max-width: 420px) {
+  .match-metadata {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
