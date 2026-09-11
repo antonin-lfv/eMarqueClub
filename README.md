@@ -18,17 +18,21 @@ Application en français de table de marque de basketball pour les tournois inte
 
 ## Utilisation
 
-Le match de démonstration contient deux équipes fictives, avec zéro action. Créer ses équipes dans « Équipes & joueurs », définir le règlement, puis créer un match. Les premiers joueurs jusqu’à la limite prévue forment le groupe initial sur le terrain. Utiliser « Changement » pour l’ajuster.
+Cliquer sur « Nouveau match » ou « Avant-match ». Choisir les équipes, cocher les présents, renseigner leurs numéros de maillot, leur statut de licence et leurs titulaires. Les numéros peuvent rester vides dans la base, mais sont obligatoires et uniques par équipe dans le match. Les informations des joueurs présents sont mémorisées au lancement. Affecter exactement un marqueur, un chronométreur et un ou deux arbitres, depuis la base ou en saisissant un nom. Une personne ne peut pas occuper deux postes ni jouer ce match en étant officiel.
 
-Sélectionner un joueur, cliquer sur le terrain puis confirmer le résultat. Au clavier, tabuler jusqu’au terrain, déplacer le point avec les flèches et valider par Entrée. Chaque action apparaît après confirmation de sa sauvegarde.
+Pénalités : jamais licencié = 0, ancien licencié = 1, licencié actuel = 3. Seuls les présents comptent. Les totaux sont compensés : 4 pour A et 7 pour B donnent A 3–0 B. Ce score est figé au lancement, affiché séparément dans les statistiques et ne consomme pas les plafonds individuels. Les anciens matchs conservent leur score initial d’origine (zéro s’il n’était pas défini).
 
-Les fautes et les temps morts arrêtent le chrono. Les lancers francs résultant des fautes sont saisis manuellement. Les fautes des prolongations s’additionnent à celles de la dernière période régulière. Les deux fautes techniques/antisportives combinées ou une disqualifiante entraînent l’exclusion, en plus du seuil configurable de fautes personnelles. Le quota de temps morts est défini pour le match entier.
+Sélectionner un joueur et cliquer sur le terrain ajoute immédiatement un panier. « Prochain tir raté » enregistre un échec au clic suivant puis revient au mode panier. Annuler, placé près du terrain et dans le journal, revient en arrière sans confirmation. Le lancer franc réussi, le lancer raté et la faute personnelle sont des actions directes. Les autres fautes restent dans leur menu de choix.
+
+La touche Espace démarre / arrête le chrono. Les boutons ±1 s, ±10 s et ±1 min le corrigent en conservant son état de marche ; le temps reste entre zéro et la durée de la période. Cliquer sur le chrono permet une correction exacte qui le met en pause. Les fautes et les temps morts arrêtent le chrono. Les lancers francs après faute restent manuels. Le quota de temps morts s’applique au match entier.
 
 ## Sauvegarde et limites
 
-La base et les matchs sont enregistrés dans Cloudflare D1. Une connexion est nécessaire à chaque action ; cette version n’est pas utilisable hors connexion. La révision de sauvegarde protège contre l’écrasement depuis une autre fenêtre. En cas de conflit, recharger la dernière version. Une erreur de sauvegarde conserve l’état précédent et les valeurs du formulaire ouvert.
+L’interface affiche immédiatement les actions. Une file de sauvegarde en arrière-plan n’envoie qu’une requête à la fois, regroupe les modifications rapides et protège les annulations pendant une requête. Chaque écriture porte un identifiant de mutation : une réponse réseau perdue peut être retentée sans doublon. Les révisions empêchent l’écrasement par une autre fenêtre.
 
-Le site est publié en accès privé. Utiliser une table de saisie à la fois pour le tournoi. Il n’y a pas encore de synchronisation en direct pour un panneau spectateur, de gestion de calendrier de tournoi ni d’import FFBB. Les exports sont des statistiques CSV et une archive JSON, pas une feuille officielle.
+La base D1 reste la référence durable. Les modifications non encore confirmées ont une copie temporaire dans `sessionStorage`, récupérée lors d’un rechargement du même onglet. Ce mécanisme n’est pas une garantie de fonctionnement hors ligne : garder la page ouverte jusqu’à confirmation de sauvegarde. Une panne affiche « Réessayer » et permet d’exporter la saisie locale. En cas de conflit, la copie locale est conservée et aucun écrasement automatique n’est effectué.
+
+Le site demeure privé. Utiliser une table de saisie à la fois. Aucun changement de partage ni de données de match existantes n’est effectué par la publication.
 
 ## Développement local
 
@@ -39,6 +43,7 @@ La base locale doit être initialisée une première fois :
 ```sh
 npm run build
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_abandoned_elektra.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_naive_professor_monster.sql
 npm run dev
 ```
 
@@ -46,8 +51,8 @@ npm run dev
 
 ## Validation de cette version
 
-12 tests métier réussis : score, plafond de 12, dépassement de plafond, fautes, exclusions combinées, banc/remplacements/annulation, temps morts, chrono, prolongations, géométrie des tirs, verrouillage, snapshots des règles et joueurs.
+25 tests métier et de file de sauvegarde : plafond, scores, pénalités compensées, présents, numéros, officiels, titulaires, exclusions, remplacements, chrono, prolongations, clics rapides, annulation pendant la sauvegarde, reprise et conflits. Vérification des types et compilation.
 
-API locale vérifiée avec lecture après écriture, conflit de révision (409), validation des règles (400), rejet d’origine étrangère (403). Les données temporaires de test sont retirées. Compilation et vérification TypeScript effectuées. Aucune campagne de clics ni vérification visuelle automatisée dans le navigateur n’a été effectuée.
+API locale : lecture après écriture, répétition idempotente, conflits, validation et migration additive. Aucun test par clics ni vérification visuelle automatisée du navigateur.
 
-Une lecture facultative WebMCP `read_basketball_match` est exposée si le navigateur propose cette API. Aucun contexte de validation WebMCP compatible n’était disponible ; son contrat n’a pas été vérifié en exécution.
+La lecture facultative WebMCP `read_basketball_match` reste disponible lorsque le navigateur propose cette API. Aucun contexte compatible de validation WebMCP n’était disponible.

@@ -39,7 +39,7 @@ export function PlayerForm({
     initial ?? {
       id: uid(),
       name: "",
-      number: 0,
+      number: null,
       teamId: teamId ?? state.teams[0]?.id ?? "",
       limited: false,
       cap: null,
@@ -52,7 +52,10 @@ export function PlayerForm({
         if (
           state.players.some(
             (o) =>
-              o.id !== p.id && o.teamId === p.teamId && o.number === p.number,
+              p.number !== null &&
+              o.id !== p.id &&
+              o.teamId === p.teamId &&
+              o.number === p.number,
           )
         ) {
           toast.error("Ce numéro est déjà utilisé dans cette équipe.");
@@ -82,15 +85,33 @@ export function PlayerForm({
         </Field>
         <Field label="Numéro de maillot">
           <input
-            required
             type="number"
             min={0}
             max={99}
-            value={p.number}
-            onChange={(e) => setP({ ...p, number: Number(e.target.value) })}
+            value={p.number ?? ""}
+            onChange={(e) =>
+              setP({
+                ...p,
+                number: e.target.value === "" ? null : Number(e.target.value),
+              })
+            }
           />
         </Field>
       </div>
+      <Field label="Licence de basketball">
+        <Picker
+          label="Statut de licence"
+          value={p.license ?? "never"}
+          onChange={(license) =>
+            setP({ ...p, license: license as Player["license"] })
+          }
+          options={[
+            { value: "never", label: "Jamais licencié · 0 pt" },
+            { value: "former", label: "Ancien licencié · 1 pt" },
+            { value: "current", label: "Licencié actuel · 3 pts" },
+          ]}
+        />
+      </Field>
       <div className="switch-field">
         <div>
           <strong>Limiter les points de ce joueur</strong>

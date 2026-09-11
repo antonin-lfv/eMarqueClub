@@ -1,6 +1,7 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  ClipboardList,
   Activity,
   Users,
   SlidersHorizontal,
@@ -34,8 +35,9 @@ import {
   type Player,
   type GameEvent,
   type Official,
-  initialState,
-  newMatch,
+  adjustClock,
+  undoLast,
+  score,
   uid,
   stats,
   timeLeft,
@@ -61,104 +63,65 @@ import {
 } from "./widgets";
 import { Library, PlayerForm } from "./library";
 import { Statistics } from "./statistics";
+import { useClub } from "./use-club";
+import { Prematch } from "./prematch";
 type ModalType =
-  | "new"
   | "officials"
   | "player"
   | "sub"
-  | "free"
   | "foul"
   | "other"
   | "clock"
   | "help"
   | null;
 export default function Home() {
-  const [state, setState] = useState<ClubState>(initialState),
-    [revision, setRevision] = useState(0),
-    [loaded, setLoaded] = useState(false),
-    [error, setError] = useState(""),
-    [busy, setBusy] = useState(false),
-    [tab, setTab] = useState("live"),
+  const { state, stateRef, loaded, error, pending, commit, retry } = useClub();
+  const busy = !loaded;
+  const [tab, setTab] = useState("live"),
     [selected, setSelected] = useState(""),
     [modal, setModal] = useState<ModalType>(null),
     [actionTeam, setActionTeam] = useState(""),
-    [shot, setShot] = useState<{ x: number; y: number; value: number } | null>(
-      null,
-    ),
-    [confirm, setConfirm] = useState<"undo" | "finish" | "reopen" | null>(null),
+    [confirm, setConfirm] = useState<"finish" | "reopen" | null>(null),
     [now, setNow] = useState(Date.now()),
-    [historyAll, setHistoryAll] = useState(false);
-  const saving = useRef(false),
-    expired = useRef("");
-  const m = state.matches.find((m) => m.id === state.activeId)!;
+    [historyAll, setHistoryAll] = useState(false),
+    [missNext, setMissNext] = useState(false),
+    [setupKey, setSetupKey] = useState("initial");
+  const expired = useRef("");
+  const currentMatch = () =>
+    stateRef.current.matches.find((g) => g.id === stateRef.current.activeId)!;
+  const m = state.matches.find((g) => g.id === state.activeId)!;
   const p = m.players.find((p) => p.id === selected);
-  const left = timeLeft(m, now);
-  const finished = m.status === "finished";
-  const load = useCallback(async () => {
+  const left = timeLeft(m, now),
+    finished = m.status === "finished";
+  function undo() {
     try {
-      const r = await fetch("/api/club", { cache: "no-store" });
-      const data = (await r.json()) as {
-        state: ClubState;
-        revision: number;
-        error?: string;
-      };
-      if (!r.ok) throw Error(data.error);
-      setState(data.state);
-      setRevision(data.revision);
-      setLoaded(true);
-      setError("");
+      void updateMatch(undoLast(currentMatch()));
     } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
-  useEffect(() => {
-    void load();
-  }, [load]);
-  async function commit(next: ClubState, message?: string) {
-    if (saving.current) {
-      toast.info("Enregistrement de l’action précédente…");
-      return false;
-    }
-    if (!loaded) {
-      toast.error("Attendez le chargement de votre tournoi.");
-      return false;
-    }
-    saving.current = true;
-    setBusy(true);
-    try {
-      const r = await fetch("/api/club", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state: next, revision }),
-      });
-      const data = (await r.json()) as { revision: number; error?: string };
-      if (!r.ok) throw Error(data.error);
-      setState(next);
-      setRevision(data.revision);
-      setError("");
-      if (message) toast.success(message);
-      return true;
-    } catch (e) {
-      setError((e as Error).message);
       toast.error((e as Error).message);
-      return false;
-    } finally {
-      saving.current = false;
-      setBusy(false);
+    }
+  }
+  function changeTime(delta: number) {
+    try {
+      void updateMatch(adjustClock(currentMatch(), delta));
+      setNow(Date.now());
+    } catch (e) {
+      toast.error((e as Error).message);
     }
   }
   function updateMatch(next: Match, message?: string) {
     return commit(
       {
-        ...state,
-        matches: state.matches.map((x) => (x.id === next.id ? next : x)),
+        ...stateRef.current,
+        matches: stateRef.current.matches.map((x) =>
+          x.id === next.id ? next : x,
+        ),
       },
       message,
     );
   }
   async function action(e: Omit<GameEvent, "id" | "period" | "remaining">) {
     try {
-      const next = addEvent(m, e);
+      const next = addEvent(currentMatch(), e);
       if (
         await updateMatch(
           next,
@@ -169,7 +132,6 @@ export default function Home() {
             : `${eventLabels[e.kind]} enregistré`,
         )
       ) {
-        setShot(null);
         setModal(null);
         if (e.kind === "foul" && excluded(next, e.playerId))
           toast.warning("Joueur exclu : effectuez son remplacement.");
@@ -181,7 +143,9 @@ export default function Home() {
     return false;
   }
   async function toggleClock() {
-    if (finished) return;
+    const m = currentMatch(),
+      left = timeLeft(m);
+    if (m.status === "finished") return;
     if (left === 0) {
       toast.info("Passez à la période suivante ou ajustez le chrono.");
       return;
@@ -216,7 +180,6 @@ export default function Home() {
           'input,textarea,button,[role="dialog"],[role="combobox"]',
         ) ||
         modal ||
-        shot ||
         confirm ||
         tab !== "live"
       )
@@ -227,7 +190,6 @@ export default function Home() {
       }
       if (e.key === "Escape") {
         setSelected("");
-        setShot(null);
       }
     };
     window.addEventListener("keydown", handler);
@@ -273,10 +235,7 @@ export default function Home() {
               match: g.title,
               home: g.home.name,
               away: g.away.name,
-              score: [
-                stats(g, undefined, g.home.id).points,
-                stats(g, undefined, g.away.id).points,
-              ],
+              score: [score(g, g.home.id), score(g, g.away.id)],
               period: g.period,
               seconds: timeLeft(g),
               status: g.status,
@@ -319,7 +278,17 @@ export default function Home() {
       toast.error("Ce joueur doit être sur le terrain pour tirer.");
       return;
     }
-    setShot({ x, y, value: shotValue(m, p.teamId, x, y) });
+    const game = currentMatch();
+    void action({
+      kind: "shot",
+      teamId: p.teamId,
+      playerId: p.id,
+      x,
+      y,
+      value: shotValue(game, p.teamId, x, y),
+      made: !missNext,
+    });
+    setMissNext(false);
   }
   const activeEvents = m.events.filter((e) => !e.voided),
     last = activeEvents.at(-1);
@@ -438,6 +407,10 @@ export default function Home() {
           eMarque<span className="club-label">CLUB</span>
         </a>
         <TabsList className="navigation" variant="line">
+          <TabsTrigger value="setup">
+            <ClipboardList size={16} />
+            Avant-match
+          </TabsTrigger>
           <TabsTrigger value="live">
             <Activity />
             Table de marque
@@ -475,13 +448,15 @@ export default function Home() {
                   : "MATCH DE CLUB"}
             </div>
             <h1>
-              {tab === "live"
-                ? "Le match, au bout des doigts."
-                : tab === "teams"
-                  ? "Le club, côté collectif."
-                  : tab === "stats"
-                    ? "Le match sous tous les angles."
-                    : "Vos tournois, vos règles."}
+              {tab === "setup"
+                ? "Préparer le prochain match."
+                : tab === "live"
+                  ? "Le match, au bout des doigts."
+                  : tab === "teams"
+                    ? "Le club, côté collectif."
+                    : tab === "stats"
+                      ? "Le match sous tous les angles."
+                      : "Vos tournois, vos règles."}
             </h1>
           </div>
           <div className="inline-actions">
@@ -499,7 +474,6 @@ export default function Home() {
                   void commit({ ...state, activeId: id }).then((ok) => {
                     if (ok) {
                       setSelected("");
-                      setShot(null);
                     }
                   });
                 }}
@@ -513,7 +487,10 @@ export default function Home() {
             <button
               disabled={busy || !loaded}
               className="button secondary"
-              onClick={() => setModal("new")}
+              onClick={() => {
+                setSetupKey(uid());
+                setTab("setup");
+              }}
             >
               <Plus size={17} />
               Nouveau match
@@ -523,13 +500,27 @@ export default function Home() {
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
+            {loaded && (
+              <button
+                className="button secondary"
+                onClick={() =>
+                  download(
+                    "emarque-saisie-en-attente.json",
+                    JSON.stringify(stateRef.current, null, 2),
+                    "application/json",
+                  )
+                }
+              >
+                Copie de secours
+              </button>
+            )}
             <button
               className="button secondary"
-              onClick={() => void load()}
+              onClick={retry}
               disabled={busy}
             >
               <RefreshCw size={15} />
-              Recharger
+              Réessayer
             </button>
           </div>
         )}
@@ -538,6 +529,32 @@ export default function Home() {
             Chargement de votre table de marque…
           </div>
         )}
+        <TabsContent value="setup" forceMount hidden={tab !== "setup"}>
+          {loaded && (
+            <Prematch
+              key={setupKey}
+              state={state}
+              onCancel={() => setTab("live")}
+              onStart={async (next) => {
+                if (
+                  currentMatch().runningUntil &&
+                  timeLeft(currentMatch()) > 0
+                ) {
+                  toast.info(
+                    "Mettez le match en pause avant d’ouvrir une autre feuille.",
+                  );
+                  return;
+                }
+                if (await commit(next, "Match prêt")) {
+                  setSelected("");
+                  setMissNext(false);
+                  setTab("live");
+                  setSetupKey(uid());
+                }
+              }}
+            />
+          )}
+        </TabsContent>
         <TabsContent value="live">
           <section className="scoreboard">
             <div className="score-team blue">
@@ -555,7 +572,7 @@ export default function Home() {
                 </span>
               </div>
               <strong className="score">
-                {String(stats(m, undefined, m.home.id).points).padStart(2, "0")}
+                {String(score(m, m.home.id)).padStart(2, "0")}
               </strong>
             </div>
             <div className="clock-area">
@@ -589,6 +606,19 @@ export default function Home() {
                 )}{" "}
                 {m.runningUntil && left > 0 ? "Pause" : "Démarrer"}
               </button>
+              <div className="clock-adjustments">
+                {[-60, -10, -1, 1, 10, 60].map((delta) => (
+                  <button
+                    key={delta}
+                    disabled={!loaded || finished}
+                    onClick={() => changeTime(delta)}
+                    aria-label={`${delta > 0 ? "Ajouter" : "Retirer"} ${Math.abs(delta)} secondes`}
+                  >
+                    {delta > 0 ? "+" : "−"}
+                    {Math.abs(delta) === 60 ? "1m" : Math.abs(delta) + "s"}
+                  </button>
+                ))}
+              </div>
               <span className="clock-hint">
                 {m.runningUntil && left > 0
                   ? "Chronomètre en cours"
@@ -597,7 +627,7 @@ export default function Home() {
             </div>
             <div className="score-team coral">
               <strong className="score">
-                {String(stats(m, undefined, m.away.id).points).padStart(2, "0")}
+                {String(score(m, m.away.id)).padStart(2, "0")}
               </strong>
               <div>
                 <small>EXTÉRIEUR</small>
@@ -614,6 +644,14 @@ export default function Home() {
               </div>
             </div>
           </section>
+          {m.startingScore && (
+            <div className="starting-notice">
+              Score de départ après compensation des pénalités :{" "}
+              <span className="blue">{m.startingScore.home}</span> –{" "}
+              <span className="coral">{m.startingScore.away}</span>
+              <span>Hors statistiques individuelles</span>
+            </div>
+          )}
           <div className="match-tools">
             <button
               className="text-button"
@@ -671,6 +709,34 @@ export default function Home() {
                   {p ? `#${p.number} · ${p.name}` : "Tirs à 2 et 3 points"}
                 </span>
               </div>
+              <div className="quick-shot-tools">
+                <button
+                  className={"button " + (!missNext ? "primary" : "secondary")}
+                  onClick={() => setMissNext(false)}
+                  aria-pressed={!missNext}
+                >
+                  <Check size={15} />
+                  Panier réussi
+                </button>
+                <button
+                  className={
+                    "button " + (missNext ? "miss-active" : "secondary")
+                  }
+                  onClick={() => setMissNext(!missNext)}
+                  aria-pressed={missNext}
+                >
+                  <X size={15} />
+                  Prochain tir raté
+                </button>
+                <button
+                  className="button secondary undo-quick"
+                  disabled={!last || finished}
+                  onClick={undo}
+                >
+                  <Undo2 size={16} />
+                  Annuler
+                </button>
+              </div>
               <div className="court-wrap">
                 <div className="court-caption">
                   <span
@@ -713,16 +779,33 @@ export default function Home() {
                 <button
                   className="button secondary"
                   disabled={!onCourtP || finished || busy}
-                  onClick={() => requirePlayer("free")}
+                  onClick={() =>
+                    p &&
+                    void action({
+                      kind: "free",
+                      teamId: p.teamId,
+                      playerId: p.id,
+                      value: 1,
+                      made: true,
+                    })
+                  }
                 >
-                  + Lancer franc
+                  +1 Lancer franc
                 </button>
                 <button
                   className="button secondary"
                   disabled={!p || finished || busy}
-                  onClick={() => requirePlayer("foul")}
+                  onClick={() =>
+                    p &&
+                    void action({
+                      kind: "foul",
+                      teamId: p.teamId,
+                      playerId: p.id,
+                      foulType: "Personnelle",
+                    })
+                  }
                 >
-                  Faute
+                  + Faute
                 </button>
                 <button
                   className="button secondary"
@@ -739,6 +822,29 @@ export default function Home() {
               <div className="extra-actions">
                 <button
                   className="text-button"
+                  disabled={!onCourtP || finished}
+                  onClick={() =>
+                    p &&
+                    void action({
+                      kind: "free",
+                      teamId: p.teamId,
+                      playerId: p.id,
+                      value: 1,
+                      made: false,
+                    })
+                  }
+                >
+                  LF raté
+                </button>
+                <button
+                  className="text-button"
+                  disabled={!p || finished}
+                  onClick={() => requirePlayer("foul")}
+                >
+                  Autre faute
+                </button>
+                <button
+                  className="text-button"
                   disabled={!onCourtP || finished || busy}
                   onClick={() => requirePlayer("other")}
                 >
@@ -748,7 +854,10 @@ export default function Home() {
                 {selected && (
                   <button
                     className="text-button"
-                    onClick={() => setSelected("")}
+                    onClick={() => {
+                      setSelected("");
+                      setMissNext(false);
+                    }}
                   >
                     Désélectionner
                   </button>
@@ -759,7 +868,7 @@ export default function Home() {
                 <span>
                   {p?.limited
                     ? `Plafond : ${stats(m, p.id).field}/${p.cap ?? m.rules.pointCap} points de tirs. Les lancers francs restent autorisés.`
-                    : "La valeur du tir est détectée selon sa position et reste ajustable avant validation."}
+                    : "Un clic = un panier. La valeur 2 / 3 pts dépend de la position. Annuler revient immédiatement en arrière."}
                 </span>
               </div>
             </section>
@@ -774,7 +883,7 @@ export default function Home() {
               <button
                 className="text-button"
                 disabled={!last || busy || finished}
-                onClick={() => setConfirm("undo")}
+                onClick={undo}
               >
                 <Undo2 size={15} />
                 Annuler la dernière action
@@ -965,8 +1074,10 @@ export default function Home() {
       <footer>
         <span>
           <span className={"live-dot " + (error ? "failed" : "")} />
-          {busy
-            ? "Enregistrement…"
+          {pending
+            ? error
+              ? "Sauvegarde en attente · saisie conservée ici"
+              : "Sauvegarde en arrière-plan…"
             : !loaded
               ? "Connexion à la sauvegarde…"
               : error
@@ -975,109 +1086,6 @@ export default function Home() {
         </span>
         <span>eMarque Club · Tournois internes & corpo</span>
       </footer>
-      {shot && p && (
-        <Modal
-          title={`Tir de #${p.number} ${p.name}`}
-          description="Confirmez la valeur et le résultat du tir. La position est conservée."
-          onClose={() => setShot(null)}
-        >
-          <div className="shot-preview">
-            <Court
-              shots={[
-                {
-                  id: "preview",
-                  ...shot,
-                  made: true,
-                  color: p.teamId === m.home.id ? "#92c5ed" : "#f2a58c",
-                },
-              ]}
-            />
-          </div>
-          <Picker
-            label="Valeur du tir"
-            value={String(shot.value)}
-            onChange={(value) => setShot({ ...shot, value: Number(value) })}
-            options={[
-              { value: "2", label: "2 points" },
-              { value: "3", label: "3 points" },
-            ]}
-          />
-          {p.limited && (
-            <p className="footnote">
-              {stats(m, p.id).field}/{p.cap ?? m.rules.pointCap} points hors LF.{" "}
-              {stats(m, p.id).field + shot.value > (p.cap ?? m.rules.pointCap)
-                ? "Ce panier dépasserait le plafond."
-                : ""}
-            </p>
-          )}
-          <div className="shot-buttons">
-            <button
-              className="button secondary"
-              disabled={busy}
-              onClick={() =>
-                void action({
-                  kind: "shot",
-                  playerId: p.id,
-                  teamId: p.teamId,
-                  ...shot,
-                  made: false,
-                })
-              }
-            >
-              <X size={20} />
-              Raté
-            </button>
-            <button
-              className="button primary"
-              disabled={
-                busy ||
-                (p.limited &&
-                  stats(m, p.id).field + shot.value >
-                    (p.cap ?? m.rules.pointCap))
-              }
-              onClick={() =>
-                void action({
-                  kind: "shot",
-                  playerId: p.id,
-                  teamId: p.teamId,
-                  ...shot,
-                  made: true,
-                })
-              }
-            >
-              <Check size={20} />
-              Réussi · +{shot.value}
-            </button>
-          </div>
-        </Modal>
-      )}
-      {modal === "new" && (
-        <NewMatchModal
-          state={state}
-          busy={busy}
-          onClose={() => setModal(null)}
-          onSave={async (match) => {
-            if (m.runningUntil && left > 0) {
-              toast.info("Mettez le match en pause avant d’en créer un autre.");
-              return;
-            }
-            if (
-              await commit(
-                {
-                  ...state,
-                  matches: [...state.matches, match],
-                  activeId: match.id,
-                },
-                "Match créé",
-              )
-            ) {
-              setModal(null);
-              setSelected("");
-              setTab("live");
-            }
-          }}
-        />
-      )}
       {modal === "player" && (
         <AddMatchPlayer
           state={state}
@@ -1086,6 +1094,11 @@ export default function Home() {
           busy={busy}
           onClose={() => setModal(null)}
           onSave={async (player, addToBase) => {
+            if (player.number === null) {
+              toast.error("Renseignez un numéro de maillot pour ce match.");
+              return;
+            }
+
             if (
               m.players.some(
                 (p) =>
@@ -1195,48 +1208,6 @@ export default function Home() {
           }}
         />
       )}
-      {modal === "free" && p && (
-        <Modal
-          title={`Lancer franc · #${p.number} ${p.name}`}
-          description="Enregistrez chaque lancer séparément. Les lancers francs ne comptent jamais dans le plafond de points."
-          onClose={() => setModal(null)}
-        >
-          <div className="shot-buttons">
-            <button
-              className="button secondary"
-              disabled={busy}
-              onClick={() =>
-                void action({
-                  kind: "free",
-                  teamId: p.teamId,
-                  playerId: p.id,
-                  value: 1,
-                  made: false,
-                })
-              }
-            >
-              <X />
-              Raté
-            </button>
-            <button
-              className="button primary"
-              disabled={busy}
-              onClick={() =>
-                void action({
-                  kind: "free",
-                  teamId: p.teamId,
-                  playerId: p.id,
-                  value: 1,
-                  made: true,
-                })
-              }
-            >
-              <Check />
-              Réussi · +1
-            </button>
-          </div>
-        </Modal>
-      )}
       {modal === "foul" && p && (
         <Modal
           title={`Faute · #${p.number} ${p.name}`}
@@ -1307,12 +1278,13 @@ export default function Home() {
               avant de créer le match.
             </li>
             <li>
-              Les premiers joueurs de chaque équipe commencent sur le terrain.
-              Utilisez Changement pour ajuster le cinq de départ.
+              Dans Avant-match, cochez les joueurs présents et les titulaires,
+              renseignez les maillots, les licences et les officiels.
             </li>
             <li>
-              Sélectionnez un joueur, cliquez sur le terrain, puis confirmez le
-              tir réussi ou raté. La valeur proposée reste modifiable.
+              Sélectionnez un joueur et cliquez sur le terrain : le panier est
+              ajouté immédiatement. Pour un échec, activez « Prochain tir raté
+              ». Annuler corrige en un clic.
             </li>
             <li>
               La touche Espace démarre ou arrête le chrono. Cliquez sur le temps
@@ -1325,41 +1297,27 @@ export default function Home() {
             </li>
           </ol>
           <p className="footnote">
-            Cette version nécessite une connexion pour enregistrer chaque
-            action. Une action n’est ajoutée qu’après sa sauvegarde. Utilisez
-            une seule table de saisie par tournoi.
+            Les actions apparaissent immédiatement et se sauvegardent en
+            arrière-plan. Gardez la page ouverte tant que la sauvegarde est en
+            attente. Une copie temporaire de cette session protège la saisie
+            lors d’un rechargement. Utilisez une seule table de saisie par
+            tournoi.
           </p>
         </Modal>
       )}
       {confirm && (
         <Confirm
           title={
-            confirm === "undo"
-              ? "Annuler la dernière action ?"
-              : confirm === "finish"
-                ? "Terminer ce match ?"
-                : "Rouvrir le match ?"
+            confirm === "finish" ? "Terminer ce match ?" : "Rouvrir le match ?"
           }
           description={
-            confirm === "undo"
-              ? `${last ? eventLabels[last.kind] : ""} : le score, les fautes et les statistiques seront recalculés. Le chrono et la période actuels sont conservés.`
-              : confirm === "finish"
-                ? "Le chronomètre sera arrêté et la feuille sera verrouillée. Vous pourrez la rouvrir pour une correction."
-                : "La saisie sera à nouveau disponible. Le chronomètre restera en pause."
+            confirm === "finish"
+              ? "Le chronomètre sera arrêté et la feuille sera verrouillée. Vous pourrez la rouvrir."
+              : "La saisie sera de nouveau disponible, chrono en pause."
           }
           onClose={() => setConfirm(null)}
           onConfirm={() => {
-            if (confirm === "undo" && last)
-              void updateMatch(
-                {
-                  ...m,
-                  events: m.events.map((e) =>
-                    e.id === last.id ? { ...e, voided: true } : e,
-                  ),
-                },
-                "Dernière action annulée",
-              );
-            else if (confirm === "finish")
+            if (confirm === "finish")
               void updateMatch(
                 {
                   ...m,
@@ -1379,83 +1337,6 @@ export default function Home() {
         />
       )}
     </Tabs>
-  );
-}
-function NewMatchModal({
-  state,
-  busy,
-  onClose,
-  onSave,
-}: {
-  state: ClubState;
-  busy: boolean;
-  onClose: () => void;
-  onSave: (m: Match) => void;
-}) {
-  const [title, setTitle] = useState("Match amical"),
-    [home, setHome] = useState(state.teams[0]?.id ?? ""),
-    [away, setAway] = useState(state.teams[1]?.id ?? "");
-  return (
-    <Modal
-      title="Un nouveau match"
-      description="Les effectifs et le règlement actuels sont copiés dans la nouvelle feuille."
-      onClose={onClose}
-    >
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          try {
-            const h = state.teams.find((t) => t.id === home),
-              a = state.teams.find((t) => t.id === away);
-            if (!h || !a) throw Error("Créez deux équipes dans la base.");
-            onSave(newMatch(title, h, a, state.players, state.rules));
-          } catch (e) {
-            toast.error((e as Error).message);
-          }
-        }}
-      >
-        <Field label="Nom du match">
-          <input
-            required
-            maxLength={90}
-            autoFocus
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </Field>
-        <div className="form-grid">
-          <Field label="Domicile">
-            <Picker
-              label="Équipe à domicile"
-              value={home}
-              onChange={setHome}
-              options={state.teams.map((t) => ({ value: t.id, label: t.name }))}
-            />
-          </Field>
-          <Field label="Extérieur">
-            <Picker
-              label="Équipe à l’extérieur"
-              value={away}
-              onChange={setAway}
-              options={state.teams.map((t) => ({ value: t.id, label: t.name }))}
-            />
-          </Field>
-        </div>
-        <div className="notice">
-          {state.rules.periods} périodes de {state.rules.minutes} min ·{" "}
-          {state.rules.onCourt} joueurs sur le terrain · Exclusion à{" "}
-          {state.rules.foulLimit} fautes
-        </div>
-        <div className="form-actions">
-          <button
-            className="button primary"
-            disabled={busy || !home || !away || home === away}
-          >
-            Créer le match
-          </button>
-        </div>
-      </form>
-    </Modal>
   );
 }
 function AddMatchPlayer({

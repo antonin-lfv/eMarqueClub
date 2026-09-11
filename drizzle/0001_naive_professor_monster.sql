@@ -1,0 +1,1 @@
+ALTER TABLE `club_state` ADD `mutation_id` text;

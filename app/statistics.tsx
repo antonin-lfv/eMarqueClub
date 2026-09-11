@@ -9,7 +9,13 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
-import { type Match, stats, periodName } from "@/lib/game";
+import {
+  type Match,
+  stats,
+  periodName,
+  score,
+  startingPoints,
+} from "@/lib/game";
 import { Court } from "./court";
 import { Picker, download } from "./widgets";
 export function Statistics({ match: m }: { match: Match }) {
@@ -36,9 +42,9 @@ export function Statistics({ match: m }: { match: Match }) {
       !e.voided && e.kind === "shot" && e.x !== undefined && e.y !== undefined,
   );
   function csv() {
-    const esc = (v: string | number) =>
+    const esc = (v: string | number | null) =>
       '"' +
-      String(v)
+      String(v ?? "")
         .replace(/^[=+@-]/, "'$&")
         .replaceAll('"', '""') +
       '"';
@@ -198,6 +204,7 @@ export function Statistics({ match: m }: { match: Match }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Équipe</TableHead>
+                <TableHead>Départ</TableHead>
                 {Array.from({ length: m.period }, (_, i) => (
                   <TableHead key={i}>{periodName(m, i + 1)}</TableHead>
                 ))}
@@ -208,6 +215,7 @@ export function Statistics({ match: m }: { match: Match }) {
               {[m.home, m.away].map((t) => (
                 <TableRow key={t.id}>
                   <TableCell>{t.short}</TableCell>
+                  <TableCell>{startingPoints(m, t.id)}</TableCell>
                   {Array.from({ length: m.period }, (_, i) => (
                     <TableCell key={i}>
                       {
@@ -223,15 +231,16 @@ export function Statistics({ match: m }: { match: Match }) {
                     </TableCell>
                   ))}
                   <TableCell>
-                    <strong>{stats(m, undefined, t.id).points}</strong>
+                    <strong>{score(m, t.id)}</strong>
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
           <p className="footnote">
-            Score global du match. Les filtres s’appliquent à la carte et aux
-            statistiques individuelles.
+            Le total inclut le score de départ. Les points de pénalité ne sont
+            pas attribués aux joueurs. Les filtres s’appliquent à la carte et
+            aux statistiques individuelles.
           </p>
         </section>
       </div>

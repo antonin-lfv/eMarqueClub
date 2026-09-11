@@ -14,8 +14,9 @@ export const rulesSchema = z.object({
 export const playerSchema = z.object({
   id,
   name,
-  number: z.number().int().min(0).max(99),
+  number: z.number().int().min(0).max(99).nullable(),
   teamId: z.string().max(100),
+  license: z.enum(["never", "former", "current"]).optional(),
   limited: z.boolean(),
   cap: z.number().int().min(1).max(100).nullable(),
 });
@@ -73,6 +74,9 @@ export const matchSchema = z.object({
   initial: z.array(id).max(10),
   events: z.array(eventSchema).max(10000),
   swapped: z.boolean(),
+  startingScore: z
+    .object({ home: z.number().int().min(0), away: z.number().int().min(0) })
+    .optional(),
   createdAt: z.string(),
 });
 export const stateSchema = z
@@ -371,8 +375,7 @@ export function nextPeriod(m: Match): Match {
   if (timeLeft(m) > 0) throw Error("Le chronomètre doit être à zéro.");
   if (
     m.period >= m.rules.periods &&
-    stats(m, undefined, m.home.id).points !==
-      stats(m, undefined, m.away.id).points
+    score(m, m.home.id) !== score(m, m.away.id)
   )
     throw Error(
       "Le match peut être terminé : les équipes ne sont pas à égalité.",
@@ -398,3 +401,135 @@ export const eventLabels: Record<GameEvent["kind"], string> = {
   turnover: "Balle perdue",
   block: "Contre",
 };
+
+export const penaltyPoints = (player: Player) =>
+  player.license === "current" ? 3 : player.license === "former" ? 1 : 0;
+export function adjustClock(m: Match, delta: number, now = Date.now()): Match {
+  if (m.status === "finished") throw Error("Ce match est terminé.");
+  const max =
+    (m.period > m.rules.periods ? m.rules.overtime : m.rules.minutes) * 60;
+  const remaining = Math.max(0, Math.min(max, timeLeft(m, now) + delta));
+  return {
+    ...m,
+    remaining,
+    runningUntil:
+      m.runningUntil !== null && remaining > 0 ? now + remaining * 1000 : null,
+  };
+}
+export function undoLast(m: Match): Match {
+  if (m.status === "finished") throw Error("Ce match est terminé.");
+  const last = m.events.findLast((e) => !e.voided);
+  return last
+    ? {
+        ...m,
+        events: m.events.map((e) =>
+          e.id === last.id ? { ...e, voided: true } : e,
+        ),
+      }
+    : m;
+}
+
+export function startingPoints(m: Match, teamId: string) {
+  return teamId === m.home.id
+    ? (m.startingScore?.home ?? 0)
+    : (m.startingScore?.away ?? 0);
+}
+export function score(m: Match, teamId: string) {
+  return stats(m, undefined, teamId).points + startingPoints(m, teamId);
+}
+export function prepareMatch(
+  state: ClubState,
+  title: string,
+  home: Team,
+  away: Team,
+  players: Player[],
+  officials: Official[],
+  starters: string[],
+): ClubState {
+  for (const team of [home, away]) {
+    const roster = players.filter((p) => p.teamId === team.id);
+    if (!roster.length)
+      throw Error(`Sélectionnez les joueurs présents de ${team.name}.`);
+    if (
+      roster.some(
+        (p) =>
+          p.number === null ||
+          !Number.isInteger(p.number) ||
+          p.number < 0 ||
+          p.number > 99,
+      )
+    )
+      throw Error(`Renseignez les maillots de ${team.name}.`);
+    if (new Set(roster.map((p) => p.number)).size !== roster.length)
+      throw Error(
+        `Un numéro de maillot est utilisé deux fois chez ${team.name}.`,
+      );
+    const target = Math.min(roster.length, state.rules.onCourt);
+    if (roster.filter((p) => starters.includes(p.id)).length !== target)
+      throw Error(`Choisissez ${target} titulaires chez ${team.name}.`);
+  }
+  if (new Set(players.map((p) => p.id)).size !== players.length)
+    throw Error("Un joueur figure dans les deux équipes.");
+  if (
+    officials.filter((o) => o.role === "Marqueur").length !== 1 ||
+    officials.filter((o) => o.role === "Chronométreur").length !== 1 ||
+    officials.filter((o) => o.role === "Arbitre").length < 1 ||
+    officials.filter((o) => o.role === "Arbitre").length > 2 ||
+    officials.length < 3 ||
+    officials.length > 4
+  )
+    throw Error("Prévoyez deux personnes à la table et un ou deux arbitres.");
+  if (officials.some((o) => !o.name.trim()))
+    throw Error("Renseignez le nom de chaque officiel.");
+  if (
+    new Set(
+      officials.map((o) => o.playerId ?? o.name.trim().toLocaleLowerCase("fr")),
+    ).size !== officials.length ||
+    new Set(officials.map((o) => o.name.trim().toLocaleLowerCase("fr")))
+      .size !== officials.length
+  )
+    throw Error("Une personne ne peut pas occuper deux postes.");
+  if (
+    officials.some(
+      (o) => o.playerId && players.some((p) => p.id === o.playerId),
+    )
+  )
+    throw Error("Un joueur présent au match ne peut pas être officiel.");
+  const m = newMatch(title, home, away, players, state.rules);
+  m.officials = structuredClone(officials);
+  m.initial = [...starters];
+  const a = players
+      .filter((p) => p.teamId === home.id)
+      .reduce((n, p) => n + penaltyPoints(p), 0),
+    b = players
+      .filter((p) => p.teamId === away.id)
+      .reduce((n, p) => n + penaltyPoints(p), 0);
+  m.startingScore = { home: Math.max(0, b - a), away: Math.max(0, a - b) };
+  const updated = state.players.map((p) => {
+    const selected = players.find((j) => j.id === p.id);
+    return selected
+      ? {
+          ...p,
+          number: selected.number,
+          license: selected.license,
+          limited: selected.limited,
+          cap: selected.cap,
+        }
+      : p;
+  });
+  return {
+    ...state,
+    players: [
+      ...updated,
+      ...players.filter((p) => !updated.some((j) => j.id === p.id)),
+    ],
+    officials: [
+      ...state.officials,
+      ...officials.filter(
+        (o) => !state.officials.some((saved) => saved.id === o.id),
+      ),
+    ],
+    matches: [...state.matches, m],
+    activeId: m.id,
+  };
+}

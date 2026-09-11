@@ -1839,3 +1839,451 @@ footer span {
   color: #a9bb9a;
   flex-shrink: 0;
 }
+/* Match preparation and immediate table controls. */
+.navigation {
+  gap: 18px !important;
+}
+.navigation [data-slot="tabs-trigger"] {
+  font-size: 13px;
+}
+.clock-adjustments {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 3px;
+  width: 100%;
+  margin: 4px 0;
+}
+.clock-adjustments button {
+  background: #263429;
+  border: 1px solid #40543a;
+  border-radius: 4px;
+  color: #cde0b9;
+  min-height: 30px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.clock-adjustments button:hover {
+  background: #435a34;
+}
+.starting-notice {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  justify-content: center;
+  color: #9da995;
+  font-size: 12px;
+  margin: -8px 0 20px;
+}
+.starting-notice > span:last-child {
+  color: #73846c;
+  margin-left: 10px;
+}
+.quick-shot-tools {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 13px 16px 0;
+}
+.quick-shot-tools .button {
+  font-size: 12px;
+  min-height: 35px;
+  padding: 7px 10px;
+}
+.quick-shot-tools .undo-quick {
+  margin-left: auto;
+}
+.miss-active {
+  background: #653a2c;
+  border-color: #bd7860;
+  color: #ffc9ab;
+}
+.extra-actions {
+  flex-wrap: wrap;
+}
+.prematch {
+  padding-top: 3px;
+}
+.setup-meta {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr auto;
+  gap: 18px;
+  align-items: end;
+  margin-bottom: 23px;
+}
+.setup-meta .field {
+  margin: 0;
+}
+.setup-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+}
+.prematch-team {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #1a231e;
+  overflow: hidden;
+}
+.prematch-team > header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.prematch-team > header h2 {
+  font-size: 18px;
+  color: #e1eada;
+}
+.prematch-team > header > span {
+  margin-left: auto;
+  font-size: 12px;
+  color: #a2b195;
+}
+.attendance-head,
+.attendance-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) 61px 135px 42px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 18px;
+}
+.attendance-head {
+  font-size: 11px;
+  color: #8da17f;
+  letter-spacing: 0.4px;
+}
+.attendance-row {
+  border-top: 1px solid #2d3a2c;
+  min-height: 65px;
+}
+.attendance-row.absent {
+  opacity: 0.5;
+}
+.attendance-name {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #e2ebdb;
+  line-height: 1.4;
+}
+.attendance-name [data-slot="checkbox"] {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.attendance-name small {
+  display: block;
+  font-size: 11px;
+  color: #a8bd85;
+}
+.jersey-input {
+  width: 100%;
+  background: #111c14;
+  border: 1px solid #40533a;
+  padding: 10px 6px;
+  text-align: center;
+  font-size: 15px;
+  color: #e1edd7;
+  border-radius: 5px;
+  appearance: textfield;
+}
+.jersey-input::-webkit-inner-spin-button {
+  appearance: none;
+}
+.attendance-row .picker {
+  font-size: 12px !important;
+  min-height: 38px;
+  padding: 7px;
+}
+.starter-toggle {
+  border: 1px solid #3c5033;
+  border-radius: 5px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: #607453;
+}
+.starter-toggle.active {
+  background: #cfe982;
+  color: #1f2c15;
+  border-color: #cfe982;
+}
+.attendance-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  padding: 18px;
+  border-top: 1px solid var(--border);
+}
+.attendance-footer > span {
+  font-size: 12px;
+  color: #98af81;
+}
+.officials-setup {
+  margin-top: 25px;
+}
+.second-referee {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: #bdd0a9;
+}
+.official-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+}
+.official-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  background: #142017;
+  border: 1px solid #32442b;
+  border-radius: 8px;
+}
+.official-slot h3 {
+  font-size: 13px;
+  color: #a9c68a;
+  font-weight: 600;
+}
+.official-name {
+  min-height: 44px;
+  border: 1px solid #3d5231;
+  background: #101b12;
+  color: #e0ebd6;
+  font-size: 14px;
+  border-radius: 5px;
+  padding: 10px 12px;
+  width: 100%;
+}
+.setup-launch {
+  margin-top: 25px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 25px;
+  border: 1px solid #657b43;
+  background: #26331f;
+  border-radius: 10px;
+  padding: 25px;
+}
+.opening-score {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+.opening-score > span {
+  font-size: 14px;
+  color: #b9cba4;
+}
+.opening-score strong {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-size: 39px;
+  line-height: 1;
+}
+.opening-score em {
+  font-size: 24px;
+  color: #7c9269;
+  font-style: normal;
+}
+.opening-score small {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: #8ea477;
+}
+.launch-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.launch-detail b {
+  font-size: 14px;
+  font-weight: 500;
+}
+.launch-detail span {
+  font-size: 12px;
+  color: #96ac80;
+}
+.setup-launch .button {
+  min-height: 50px;
+}
+.prematch [data-slot="select-trigger"] {
+  white-space: normal !important;
+}
+.prematch [data-slot="select-value"] {
+  text-align: left;
+}
+@media (max-width: 1250px) {
+  .setup-teams {
+    grid-template-columns: 1fr;
+  }
+  .attendance-head,
+  .attendance-row {
+    grid-template-columns: minmax(150px, 1fr) 75px 180px 55px;
+  }
+  .navigation {
+    gap: 10px !important;
+  }
+  .navigation [data-slot="tabs-trigger"] {
+    font-size: 12px;
+  }
+  .setup-launch {
+    flex-wrap: wrap;
+  }
+  .opening-score {
+    flex: 1;
+  }
+  .setup-meta {
+    grid-template-columns: 1fr 1fr;
+  }
+  .setup-meta > .field:first-child {
+    grid-column: 1/-1;
+  }
+  .setup-meta > .button {
+    grid-column: 1/-1;
+    justify-self: end;
+  }
+}
+@media (max-width: 850px) {
+  .navigation {
+    width: 100% !important;
+  }
+  .navigation [data-slot="tabs-trigger"] {
+    font-size: 12px;
+  }
+  .quick-shot-tools .button {
+    font-size: 13px;
+    padding: 9px 11px;
+  }
+  .clock-adjustments {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .clock-adjustments button {
+    font-size: 12px;
+    min-height: 28px;
+  }
+  .clock-area .clock {
+    font-size: 35px;
+  }
+  .starting-notice {
+    flex-wrap: wrap;
+    line-height: 1.5;
+  }
+  .starting-notice > span:last-child {
+    display: none;
+  }
+  .setup-launch > .button {
+    width: 100%;
+  }
+}
+@media (max-width: 560px) {
+  .navigation {
+    overflow-x: auto;
+    justify-content: flex-start !important;
+    gap: 12px !important;
+  }
+  .navigation [data-slot="tabs-trigger"] {
+    flex-shrink: 0;
+    font-size: 11px;
+    padding: 0 3px;
+  }
+  .quick-shot-tools {
+    padding: 12px 10px 0;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+  .quick-shot-tools .button {
+    font-size: 11px;
+    padding: 8px;
+    gap: 4px;
+  }
+  .quick-shot-tools .undo-quick {
+    font-size: 0;
+    min-width: 35px;
+  }
+  .clock-adjustments {
+    gap: 3px;
+  }
+  .clock-adjustments button {
+    font-size: 10px;
+  }
+  .clock-area .clock {
+    font-size: 27px;
+  }
+  .clock-area .clock-hint {
+    display: none;
+  }
+  .attendance-head,
+  .attendance-row {
+    grid-template-columns: minmax(100px, 1fr) 45px 105px 30px;
+    gap: 7px;
+    padding: 12px 9px;
+  }
+  .attendance-name {
+    font-size: 12px;
+    gap: 6px;
+  }
+  .attendance-name [data-slot="checkbox"] {
+    width: 17px;
+    height: 17px;
+  }
+  .attendance-row .picker {
+    font-size: 10px !important;
+    padding: 5px;
+    gap: 2px;
+  }
+  .attendance-head {
+    font-size: 10px;
+  }
+  .starter-toggle {
+    width: 28px;
+    height: 32px;
+  }
+  .jersey-input {
+    font-size: 13px;
+  }
+  .prematch-team > header {
+    padding: 16px 10px;
+    gap: 6px;
+  }
+  .prematch-team > header h2 {
+    font-size: 15px;
+  }
+  .prematch-team > header > span {
+    font-size: 10px;
+  }
+  .setup-meta {
+    padding: 18px;
+    gap: 15px;
+  }
+  .setup-launch {
+    padding: 20px;
+    gap: 20px;
+  }
+  .opening-score {
+    flex-basis: 100%;
+    justify-content: space-between;
+  }
+  .opening-score strong {
+    font-size: 36px;
+  }
+  .officials-setup {
+    padding: 18px;
+  }
+  .official-slots {
+    grid-template-columns: 1fr;
+  }
+  .launch-detail {
+    flex: 1;
+  }
+}

@@ -71,7 +71,11 @@ export async function PUT(request: Request) {
     if (
       !result.success ||
       !Number.isInteger(data.revision) ||
-      data.revision < 0
+      data.revision < 0 ||
+      (data.mutationId !== undefined &&
+        (typeof data.mutationId !== "string" ||
+          data.mutationId.length > 100 ||
+          !data.mutationId))
     )
       return Response.json(
         { error: "Données du match invalides." },
@@ -79,30 +83,42 @@ export async function PUT(request: Request) {
       );
     const r = await clubDb()
       .prepare(
-        "UPDATE club_state SET payload = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?",
+        "UPDATE club_state SET payload = ?, revision = revision + 1, updated_at = ?, mutation_id = ? WHERE id = ? AND revision = ?",
       )
       .bind(
         JSON.stringify(result.data),
         new Date().toISOString(),
+        data.mutationId ?? null,
         "club",
         data.revision,
       )
       .run();
-    if (!r.meta.changes)
+    if (!r.meta.changes) {
+      const previous = await clubDb()
+        .prepare("SELECT revision,mutation_id FROM club_state WHERE id = ?")
+        .bind("club")
+        .first<{ revision: number; mutation_id: string | null }>();
+      if (
+        data.mutationId &&
+        previous &&
+        previous.mutation_id === data.mutationId
+      )
+        return Response.json({ revision: previous.revision });
       return Response.json(
         {
           error:
-            "Le match a été modifié dans une autre fenêtre. Rechargez pour récupérer la dernière version.",
+            "Conflit avec une autre fenêtre. Votre saisie est conservée ici. Exportez la copie de secours avant de résoudre le conflit.",
         },
         { status: 409 },
       );
+    }
     return Response.json({ revision: data.revision + 1 });
   } catch (error) {
     console.error("Save club", error);
     return Response.json(
       {
         error:
-          "Action non enregistrée. Vos données précédentes sont conservées ; réessayez.",
+          "Sauvegarde en attente. Les actions restent visibles et conservées dans cette fenêtre ; réessayez.",
       },
       { status: 503 },
     );
