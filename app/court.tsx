@@ -152,7 +152,7 @@ export function Court({
           <circle
             r=".26"
             fill={s.made ? s.color : "#20342c"}
-            stroke={s.color}
+            stroke="#edf1ed"
             strokeWidth=".06"
           />
           {!s.made && (

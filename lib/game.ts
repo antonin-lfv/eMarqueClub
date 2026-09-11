@@ -91,6 +91,13 @@ export const matchSchema = z.object({
   closingMessage: z.string().max(2000).optional(),
   remarks: z.string().max(6000).optional(),
   createdAt: z.string(),
+  scheduledAt: z.string().datetime({ offset: true }).optional(),
+  kitColors: z
+    .object({
+      home: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+      away: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    })
+    .optional(),
 });
 export const stateSchema = z
   .object({
@@ -396,6 +403,8 @@ export function prepareMatch(
   _legacyStarters: string[] = [],
   options: {
     stage?: "pool" | "final";
+    scheduledAt?: string;
+    kitColors?: { home: string; away: string };
     agreement?: { home: boolean; away: boolean };
   } = {},
 ): ClubState {
@@ -457,6 +466,13 @@ export function prepareMatch(
   )
     throw Error("Un joueur présent au match ne peut pas être officiel.");
   const m = newMatch(title, home, away, players, state.rules);
+  if (options.scheduledAt) m.scheduledAt = options.scheduledAt;
+  if (options.kitColors) {
+    m.kitColors = { ...options.kitColors };
+    m.home.color = options.kitColors.home;
+    m.away.color = options.kitColors.away;
+  }
+  matchSchema.parse(m);
   m.officials = structuredClone(officials);
   m.stage = options.stage ?? "pool";
   m.agreement = options.agreement ?? { home: false, away: false };
@@ -697,8 +713,20 @@ export function updateTeamInClub(state: ClubState, team: Team): ClubState {
         ? m
         : {
             ...m,
-            home: m.home.id === team.id ? team : m.home,
-            away: m.away.id === team.id ? team : m.away,
+            home:
+              m.home.id === team.id
+                ? {
+                    ...team,
+                    ...(m.kitColors ? { color: m.kitColors.home } : {}),
+                  }
+                : m.home,
+            away:
+              m.away.id === team.id
+                ? {
+                    ...team,
+                    ...(m.kitColors ? { color: m.kitColors.away } : {}),
+                  }
+                : m.away,
           },
     ),
   };
@@ -739,4 +767,40 @@ export function resetTable(state: ClubState, matchId: string): ClubState {
     matches: state.matches.filter((g) => g.id !== matchId),
     activeId: null,
   };
+}
+
+export function localMatchDateTime(now = new Date()) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return {
+    date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+    time: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
+  };
+}
+export function scheduledMatchTime(date: string, time: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time))
+    throw Error("Renseignez la date et l’heure du match.");
+  const parsed = new Date(`${date}T${time}:00`);
+  if (!Number.isFinite(parsed.getTime()))
+    throw Error("Date ou heure invalide.");
+  const roundtrip = localMatchDateTime(parsed);
+  if (roundtrip.date !== date || roundtrip.time !== time)
+    throw Error(
+      "Cette date ou cette heure n’existe pas dans votre fuseau horaire.",
+    );
+  return parsed.toISOString();
+}
+export const matchDateLabel = (m: Match) =>
+  new Date(m.scheduledAt ?? m.createdAt).toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+export function kitInk(color: string) {
+  const r = parseInt(color.slice(1, 3), 16),
+    g = parseInt(color.slice(3, 5), 16),
+    b = parseInt(color.slice(5, 7), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 145 ? "#172018" : "#ffffff";
 }

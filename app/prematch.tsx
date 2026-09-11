@@ -1,6 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Plus, Shield, ArrowRight, Trash2 } from "lucide-react";
+import {
+  Plus,
+  Shield,
+  ArrowRight,
+  Shirt,
+  CalendarDays,
+  Clock3,
+} from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import {
@@ -13,8 +20,18 @@ import {
   newMatch,
   teamColor,
   uid,
+  localMatchDateTime,
+  scheduledMatchTime,
+  kitInk,
 } from "@/lib/game";
 import { Field, Picker, Modal, Confirm } from "./widgets";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   OfficialEditor,
   AddRosterPlayer,
@@ -40,6 +57,8 @@ export function Prematch({
   const [teams, setTeams] = useState(state.teams),
     [home, setHome] = useState(state.teams[0]?.id ?? ""),
     [away, setAway] = useState(state.teams[1]?.id ?? ""),
+    [kitColors, setKitColors] = useState<Record<string, string>>({}),
+    [schedule, setSchedule] = useState(() => localMatchDateTime()),
     [edits, setEdits] = useState<Record<string, Partial<Player>>>({}),
     [absent, setAbsent] = useState<string[]>([]),
     [loans, setLoans] = useState<Player[]>([]),
@@ -90,8 +109,19 @@ export function Prematch({
       }),
   ];
   const selected = all.filter((p) => !absent.includes(p.id));
-  const h = teams.find((t) => t.id === home),
-    a = teams.find((t) => t.id === away);
+  const matchTeam = (id: string, side: "home" | "away") => {
+    const team = teams.find((t) => t.id === id);
+    return team
+      ? {
+          ...team,
+          color:
+            kitColors[id] ??
+            teamColor(team, side === "home" ? "#92c5ed" : "#f2a58c"),
+        }
+      : undefined;
+  };
+  const h = matchTeam(home, "home"),
+    a = matchTeam(away, "away");
   const provisional =
     h && a && h.id !== a.id
       ? { ...newMatch("", h, a, selected, state.rules), stage }
@@ -100,6 +130,7 @@ export function Prematch({
     ? calculateStartingScore(provisional)
     : { home: 0, away: 0 };
   function pickTeam(side: "home" | "away", id: string) {
+    if (id === (side === "home" ? home : away)) return;
     if (id === (side === "home" ? away : home)) {
       toast.error("Choisissez deux équipes différentes.");
       return;
@@ -111,7 +142,7 @@ export function Prematch({
     setPendingTeam({ side, id });
   }
   function teamPanel(teamId: string, side: "home" | "away") {
-    const team = teams.find((t) => t.id === teamId),
+    const team = matchTeam(teamId, side),
       ps = all.filter((p) => p.teamId === teamId),
       present = selected.filter((p) => p.teamId === teamId),
       borrowed = present.filter(
@@ -122,7 +153,7 @@ export function Prematch({
         className="prematch-team"
         style={{
           color: team
-            ? teamColor(team, side === "home" ? "#92c5ed" : "#f2a58c")
+            ? `color-mix(in srgb, ${teamColor(team, side === "home" ? "#92c5ed" : "#f2a58c")} 30%, var(--foreground))`
             : undefined,
         }}
       >
@@ -272,7 +303,12 @@ export function Prematch({
         selected,
         officials,
         [],
-        { stage, agreement },
+        {
+          stage,
+          agreement,
+          scheduledAt: scheduledMatchTime(schedule.date, schedule.time),
+          kitColors: { home: h.color!, away: a.color! },
+        },
       );
       const incomplete =
         selected.filter((p) => p.teamId === home).length < 5 ||
@@ -297,43 +333,171 @@ export function Prematch({
           </button>
         )}
       </div>
-      <section className="panel setup-meta">
-        <Field label="Domicile">
-          <Picker
-            label="Domicile"
-            value={home}
-            onChange={(id) => pickTeam("home", id)}
-            options={teams.map((t) => ({ value: t.id, label: t.name }))}
-          />
-        </Field>
-        <Field label="Extérieur">
-          <Picker
-            label="Extérieur"
-            value={away}
-            onChange={(id) => pickTeam("away", id)}
-            options={teams.map((t) => ({ value: t.id, label: t.name }))}
-          />
-        </Field>
-        <Field label="Phase">
-          <Picker
-            label="Phase du tournoi"
-            value={stage}
-            onChange={(v) => setStage(v as typeof stage)}
-            options={[
-              { value: "pool", label: "Poules · pénalités activées" },
-              { value: "final", label: "Phase finale · sans pénalités" },
-            ]}
-          />
-        </Field>
-        <button
-          className="button secondary"
-          onClick={() =>
-            setTeamDraft({ id: uid(), name: "", short: "", color: "#92c5ed" })
-          }
-        >
-          <Plus size={15} />
-          Équipe
-        </button>
+      <section className="fixture-builder">
+        <div className="fixture-teams">
+          {(["home", "away"] as const).map((side) => {
+            const team = side === "home" ? h : a;
+            const color =
+              team?.color ?? (side === "home" ? "#92c5ed" : "#f2a58c");
+            return (
+              <section className="fixture-team-card" key={side}>
+                <div className="fixture-side">
+                  {side === "home"
+                    ? "ÉQUIPE À DOMICILE"
+                    : "ÉQUIPE À L’EXTÉRIEUR"}
+                </div>
+                <div className="fixture-team-choice">
+                  <div
+                    className="kit-preview"
+                    style={{ background: color, color: kitInk(color) }}
+                  >
+                    <Shirt aria-hidden="true" />
+                  </div>
+                  <Select
+                    value={side === "home" ? home : away}
+                    onValueChange={(id) => pickTeam(side, id)}
+                  >
+                    <SelectTrigger
+                      className="fixture-team-select"
+                      aria-label={
+                        side === "home"
+                          ? "Équipe à domicile"
+                          : "Équipe à l’extérieur"
+                      }
+                    >
+                      <SelectValue placeholder="Choisir une équipe" />
+                    </SelectTrigger>
+                    <SelectContent position="popper">
+                      {teams.map((t) => (
+                        <SelectItem
+                          key={t.id}
+                          value={t.id}
+                          disabled={t.id === (side === "home" ? away : home)}
+                        >
+                          <span
+                            className="team-color-dot"
+                            style={{ background: teamColor(t) }}
+                          />
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="kit-label">
+                  <Shirt size={15} />
+                  <span>Maillot pour cette rencontre</span>
+                </div>
+                <div className="kit-palette">
+                  {[
+                    { label: "Blanc", color: "#ffffff" },
+                    { label: "Noir", color: "#171717" },
+                    { label: "Bleu", color: "#2563eb" },
+                    { label: "Rouge", color: "#dc2626" },
+                    { label: "Vert", color: "#16a34a" },
+                    { label: "Jaune", color: "#facc15" },
+                    { label: "Orange", color: "#f97316" },
+                    { label: "Violet", color: "#9333ea" },
+                  ].map((c) => (
+                    <button
+                      key={c.color}
+                      type="button"
+                      className={
+                        "kit-swatch " + (color === c.color ? "chosen" : "")
+                      }
+                      style={{ background: c.color }}
+                      aria-label={`${c.label} · ${side === "home" ? "domicile" : "extérieur"}`}
+                      aria-pressed={color === c.color}
+                      title={c.label}
+                      disabled={!team}
+                      onClick={() =>
+                        team &&
+                        setKitColors((prev) => ({
+                          ...prev,
+                          [team.id]: c.color,
+                        }))
+                      }
+                    />
+                  ))}
+                  <label className="custom-kit" title="Couleur personnalisée">
+                    <input
+                      type="color"
+                      aria-label={`Couleur personnalisée ${side === "home" ? "domicile" : "extérieur"}`}
+                      value={color}
+                      disabled={!team}
+                      onChange={(e) =>
+                        team &&
+                        setKitColors((prev) => ({
+                          ...prev,
+                          [team.id]: e.target.value,
+                        }))
+                      }
+                    />
+                    <span>Autre</span>
+                  </label>
+                </div>
+                <p className="kit-hint">Cette couleur est propre au match.</p>
+              </section>
+            );
+          })}
+          <span className="fixture-versus" aria-hidden="true">
+            VS
+          </span>
+        </div>
+        <div className="fixture-details">
+          <Field label="Date du match">
+            <div className="schedule-input">
+              <CalendarDays size={18} />
+              <input
+                type="date"
+                required
+                value={schedule.date}
+                onChange={(e) =>
+                  setSchedule({ ...schedule, date: e.target.value })
+                }
+              />
+            </div>
+          </Field>
+          <Field label="Heure prévue">
+            <div className="schedule-input">
+              <Clock3 size={18} />
+              <input
+                type="time"
+                required
+                value={schedule.time}
+                onChange={(e) =>
+                  setSchedule({ ...schedule, time: e.target.value })
+                }
+              />
+            </div>
+          </Field>
+          <Field label="Phase">
+            <Picker
+              label="Phase du tournoi"
+              value={stage}
+              onChange={(v) => setStage(v as typeof stage)}
+              options={[
+                { value: "pool", label: "Poules · pénalités activées" },
+                { value: "final", label: "Phase finale · sans pénalités" },
+              ]}
+            />
+          </Field>
+          <button
+            className="button secondary"
+            onClick={() =>
+              setTeamDraft({ id: uid(), name: "", short: "", color: "#92c5ed" })
+            }
+          >
+            <Plus size={16} />
+            Nouvelle équipe
+          </button>
+        </div>
+        {h && a && h.color === a.color && (
+          <p className="kit-warning">
+            Les deux équipes portent la même couleur. Choisissez des maillots
+            distincts pour faciliter la saisie.
+          </p>
+        )}
       </section>
       <div className="setup-teams">
         {teamPanel(home, "home")}
@@ -355,9 +519,23 @@ export function Prematch({
         <div className="opening-score">
           <span>Score de départ</span>
           <strong>
-            <span style={{ color: h && teamColor(h) }}>{opening.home}</span>
+            <span
+              style={{
+                color:
+                  h &&
+                  `color-mix(in srgb, ${teamColor(h)} 30%, var(--foreground))`,
+              }}
+            >
+              {opening.home}
+            </span>
             <em>–</em>
-            <span style={{ color: a && teamColor(a, "#f2a58c") }}>
+            <span
+              style={{
+                color:
+                  a &&
+                  `color-mix(in srgb, ${teamColor(a, "#f2a58c")} 30%, var(--foreground))`,
+              }}
+            >
               {opening.away}
             </span>
           </strong>

@@ -17,6 +17,7 @@ import {
   startingPoints,
   teamColor,
   matchLabel,
+  matchDateLabel,
 } from "@/lib/game";
 import { Court } from "./court";
 import { Picker, download } from "./widgets";
@@ -107,7 +108,9 @@ export function Statistics({ match: m }: { match: Match }) {
       <div className="section-heading">
         <div>
           <h2>Chaque action compte.</h2>
-          <p>Match sélectionné : {matchLabel(m)}</p>
+          <p>
+            Match sélectionné : {matchLabel(m)} · {matchDateLabel(m)}
+          </p>
         </div>
         <button className="button secondary" onClick={csv}>
           <Download size={16} />

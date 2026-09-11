@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AppTheme } from "./theme";
 
 export const metadata: Metadata = {
   title: "eMarque Club · Table de marque",
-  description: "Table de marque de basketball pour vos tournois internes et corpo.",
+  description:
+    "Table de marque de basketball pour vos tournois internes et corpo.",
   other: {
     "codex-preview": "development",
   },
@@ -19,8 +21,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="fr">
-      <body className="antialiased">{children}</body>
+    <html lang="fr" suppressHydrationWarning>
+      <body className="antialiased">
+        <AppTheme>{children}</AppTheme>
+      </body>
     </html>
   );
 }

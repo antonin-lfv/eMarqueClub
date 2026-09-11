@@ -21,6 +21,7 @@ import {
   RefreshCw,
   UserRound,
   ClipboardList,
+  CalendarDays,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Toaster, toast } from "sonner";
@@ -54,6 +55,8 @@ import {
   defaults,
   finishMatch,
   resetTable,
+  matchDateLabel,
+  kitInk,
 } from "@/lib/game";
 import { Court } from "./court";
 import {
@@ -69,8 +72,11 @@ import { Statistics } from "./statistics";
 import { Prematch } from "./prematch";
 import { AddRosterPlayer, OfficialEditor, defaultOfficials } from "./people";
 import { useClub } from "./use-club";
+import { ThemeToggle } from "./theme";
+import { useTheme } from "next-themes";
 type Commit = (state: ClubState, message?: string) => Promise<boolean>;
 export default function Home() {
+  const { resolvedTheme } = useTheme();
   const { state, stateRef, loaded, error, pending, commit, retry } = useClub();
   const [tab, setTab] = useState("live"),
     [setupKey, setSetupKey] = useState("first"),
@@ -194,7 +200,11 @@ export default function Home() {
   }, []);
   return (
     <Tabs className="application" value={tab} onValueChange={setTab}>
-      <Toaster theme="dark" richColors position="bottom-center" />
+      <Toaster
+        theme={resolvedTheme === "light" ? "light" : "dark"}
+        richColors
+        position="bottom-center"
+      />
       <header className="topbar">
         <a href="/" className="brand">
           <span className="brand-icon">
@@ -220,6 +230,7 @@ export default function Home() {
             Équipes et joueurs
           </TabsTrigger>
         </TabsList>
+        <ThemeToggle />
         <button
           className="avatar"
           aria-label="Aide"
@@ -250,6 +261,12 @@ export default function Home() {
                         ? matchLabel(m)
                         : "Prêt pour le prochain match ?"}
             </h1>
+            {m && tab === "live" && (
+              <p className="match-scheduled">
+                <CalendarDays size={15} />
+                {matchDateLabel(m)}
+              </p>
+            )}
           </div>
           <div className="inline-actions">
             {tab === "live" && openMatches.length > (m ? 1 : 0) && (
@@ -271,7 +288,7 @@ export default function Home() {
                   }}
                   options={openMatches.map((g) => ({
                     value: g.id,
-                    label: `${matchLabel(g)} · ${new Date(g.createdAt).toLocaleDateString("fr-FR")}${g.status === "finished" ? " · Terminé" : ""}`,
+                    label: `${matchLabel(g)} · ${matchDateLabel(g)}${g.status === "finished" ? " · Terminé" : ""}`,
                   }))}
                 />
               </div>
@@ -328,9 +345,11 @@ export default function Home() {
                   marque.
                 </li>
                 <li>
-                  <b>Joueurs et couleurs :</b> modifiables dans « Équipes et
-                  joueurs », avec mise à jour du match et confirmation des
-                  changements sensibles.
+                  <b>Joueurs et identité des équipes :</b> modifiables dans «
+                  Équipes et joueurs », avec mise à jour du match et
+                  confirmation des changements sensibles. Les couleurs de
+                  maillot choisies à l’avant-match restent propres à cette
+                  rencontre.
                 </li>
                 <li>
                   <b>Équipes engagées et règlement :</b> fixés au lancement. Les
@@ -422,12 +441,10 @@ export default function Home() {
                 label="Rencontre à consulter"
                 value={statsMatch.id}
                 onChange={setStatsId}
-                options={state.matches
-                  .toReversed()
-                  .map((g) => ({
-                    value: g.id,
-                    label: `${matchLabel(g)} · ${new Date(g.createdAt).toLocaleDateString("fr-FR")} · ${g.status === "finished" ? "Terminé" : "En cours"}`,
-                  }))}
+                options={state.matches.toReversed().map((g) => ({
+                  value: g.id,
+                  label: `${matchLabel(g)} · ${matchDateLabel(g)} · ${g.status === "finished" ? "Terminé" : "En cours"}`,
+                }))}
               />
             )}
             <span className="muted">
@@ -585,8 +602,8 @@ export default function Home() {
             </li>
             <li>
               L’avant-match prépare une nouvelle feuille. Une fois lancée, les
-              officiels se modifient depuis la table et les couleurs depuis la
-              base.
+              officiels se modifient depuis la table. Les couleurs de maillot
+              sont choisies dans l’avant-match pour chaque rencontre.
             </li>
             <li>
               Terminer conserve le résultat et libère la table. Réinitialiser
@@ -734,7 +751,10 @@ function LiveTable({
   function teamPanel(team: Match["home"], color: string) {
     const ps = m.players.filter((p) => p.teamId === team.id);
     return (
-      <section className="roster" style={{ color }}>
+      <section
+        className="roster"
+        style={{ color: `color-mix(in srgb, ${color} 30%, var(--foreground))` }}
+      >
         <div className="roster-title">
           <Shield size={18} />
           <h2>{team.name}</h2>
@@ -801,7 +821,13 @@ function LiveTable({
             <div
               key={team.id}
               className={"score-team " + (i === 2 ? "away-score" : "")}
-              style={{ color: colors[team.id] }}
+              style={
+                {
+                  color: `color-mix(in srgb, ${colors[team.id]} 30%, var(--foreground))`,
+                  "--kit-color": colors[team.id],
+                  "--kit-ink": kitInk(colors[team.id]),
+                } as CSSProperties
+              }
             >
               {i === 2 && (
                 <strong className="score">
@@ -1168,7 +1194,9 @@ function LiveTable({
                 </span>
                 <span
                   className="event-symbol"
-                  style={{ color: colors[e.teamId] }}
+                  style={{
+                    color: `color-mix(in srgb, ${colors[e.teamId]} 30%, var(--foreground))`,
+                  }}
                 >
                   {e.kind === "shot"
                     ? `+${e.value}`

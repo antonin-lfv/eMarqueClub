@@ -5,6 +5,9 @@ import {
   initialState,
   finishMatch,
   resetTable,
+  localMatchDateTime,
+  scheduledMatchTime,
+  matchDateLabel,
   removeDemo,
   prepareMatch,
   calculateStartingScore,
@@ -421,5 +424,76 @@ describe("Cycle de la table de marque", () => {
     assert.deepEqual(next.matches[0], closed.matches[0]);
     assert.equal(next.matches[1].events.length, 0);
     assert.equal(next.matches[1].remaining, 600);
+  });
+});
+
+describe("Maillots et horaire de rencontre", () => {
+  it("stores match-only colors without changing the base and retains them through team edits", () => {
+    const s = fixtureState();
+    s.matches = [];
+    s.activeId = null;
+    const original = structuredClone(s.teams);
+    const next = prepareMatch(
+      s,
+      "",
+      s.teams[0],
+      s.teams[1],
+      s.players,
+      officials,
+      [],
+      {
+        kitColors: { home: "#ffffff", away: "#171717" },
+        scheduledAt: "2026-09-12T17:30:00.000Z",
+      },
+    );
+    const m = next.matches[0];
+    assert.equal(m.home.color, "#ffffff");
+    assert.equal(m.away.color, "#171717");
+    assert.deepEqual(next.teams, original);
+    const changed = updateTeamInClub(next, {
+      ...s.teams[0],
+      name: "Nouveau nom",
+      color: "#ff0000",
+    });
+    assert.equal(changed.matches[0].home.name, "Nouveau nom");
+    assert.equal(changed.matches[0].home.color, "#ffffff");
+    assert.equal(changed.teams[0].color, "#ff0000");
+    const saved = stateSchema.parse(JSON.parse(JSON.stringify(changed)));
+    assert.deepEqual(saved.matches[0].kitColors, m.kitColors);
+    assert.equal(saved.matches[0].scheduledAt, "2026-09-12T17:30:00.000Z");
+    const closed = finishMatch(saved, m.id, "", "");
+    assert.equal(closed.matches[0].home.color, "#ffffff");
+    assert.equal(closed.matches[0].scheduledAt, m.scheduledAt);
+  });
+  it("validates custom colors and dates rather than silently dropping them", () => {
+    const s = fixtureState();
+    assert.throws(() =>
+      prepareMatch(s, "", s.teams[0], s.teams[1], s.players, officials, [], {
+        kitColors: { home: "red", away: "#ffffff" },
+      }),
+    );
+    assert.throws(() =>
+      prepareMatch(s, "", s.teams[0], s.teams[1], s.players, officials, [], {
+        scheduledAt: "not a date",
+      }),
+    );
+  });
+  it("prefills and roundtrips the local date and time without using the UTC day", () => {
+    const date = new Date(2026, 8, 11, 0, 5);
+    assert.deepEqual(localMatchDateTime(date), {
+      date: "2026-09-11",
+      time: "00:05",
+    });
+    assert.equal(scheduledMatchTime("2026-09-11", "00:05"), date.toISOString());
+    assert.throws(() => scheduledMatchTime("2026-02-30", "14:00"));
+    assert.throws(() => scheduledMatchTime("2026-09-11", "25:05"));
+    assert.throws(() => scheduledMatchTime("", ""));
+  });
+  it("shows the planned date while keeping legacy sheets readable", () => {
+    const m = setup().matches[0];
+    assert.ok(matchDateLabel(m).length > 0);
+    m.scheduledAt = new Date(2026, 8, 12, 19, 30).toISOString();
+    assert.match(matchDateLabel(m), /12\/09\/2026/);
+    assert.match(matchDateLabel(m), /19:30/);
   });
 });
