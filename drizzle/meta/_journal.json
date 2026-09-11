@@ -15,6 +15,13 @@
       "when": 1789121251994,
       "tag": "0001_naive_professor_monster",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789127411594,
+      "tag": "0002_add_lynx_test_team",
+      "breakpoints": true
     }
   ]
 }

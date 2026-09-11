@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { fixtureState } from "./fixture.ts";
 import {
   initialState,
+  finishMatch,
+  resetTable,
   removeDemo,
   prepareMatch,
   calculateStartingScore,
@@ -72,7 +74,7 @@ describe("Feuilles Corpo", () => {
     s.activeId = "demo";
     const next = removeDemo(s);
     assert.equal(next.matches.length, 1);
-    assert.equal(next.activeId, s.matches[0].id);
+    assert.equal(next.activeId, null);
     assert.deepEqual(next.players, s.players);
   });
   it("compensates 4 versus 7 as 3–0 without assigning handicap to player statistics", () => {
@@ -346,5 +348,78 @@ describe("Feuilles Corpo", () => {
     const saved = stateSchema.parse(JSON.parse(JSON.stringify(s)));
     assert.equal(saved.matches[0].remarks, s.matches[0].remarks);
     assert.throws(() => addEvent(saved.matches[0], basket()), /terminé/);
+  });
+});
+
+describe("Cycle de la table de marque", () => {
+  it("archives the finished result and notes, stops time and leaves the table empty even after reload", () => {
+    const s = setup();
+    const id = s.activeId!;
+    s.matches[0] = addEvent(s.matches[0], basket());
+    s.matches[0].runningUntil = 101000;
+    const next = finishMatch(s, id, "Merci", "Accord reçu", 1000);
+    assert.equal(next.activeId, null);
+    assert.equal(next.matches.length, 1);
+    assert.equal(next.matches[0].status, "finished");
+    assert.equal(next.matches[0].runningUntil, null);
+    assert.equal(next.matches[0].remaining, 100);
+    assert.equal(score(next.matches[0], "aigles"), 5);
+    assert.deepEqual(next.matches[0].events, s.matches[0].events);
+    assert.equal(next.matches[0].remarks, "Accord reçu");
+    assert.equal(
+      removeDemo(stateSchema.parse(JSON.parse(JSON.stringify(next)))).activeId,
+      null,
+    );
+    assert.throws(() => finishMatch(next, id, "", ""), /terminée/);
+    assert.throws(() => resetTable(next, id), /réinitialisée/);
+  });
+  it("discards only the reset active sheet and preserves the library and archived results", () => {
+    const s = setup();
+    const active = s.activeId!;
+    s.matches[0] = addEvent(s.matches[0], basket());
+    const archive = {
+      ...structuredClone(s.matches[0]),
+      id: "archive",
+      status: "finished" as const,
+    };
+    s.matches.push(archive);
+    const next = resetTable(s, active);
+    assert.equal(next.activeId, null);
+    assert.deepEqual(next.matches, [archive]);
+    assert.deepEqual(next.players, s.players);
+    assert.deepEqual(next.teams, s.teams);
+    assert.deepEqual(next.rules, s.rules);
+    assert.deepEqual(next.officials, s.officials);
+    assert.equal(
+      removeDemo(stateSchema.parse(JSON.parse(JSON.stringify(next)))).activeId,
+      null,
+    );
+  });
+  it("does not activate another pending match automatically or reopen a legacy finished sheet", () => {
+    const s = setup();
+    s.matches.push({ ...structuredClone(s.matches[0]), id: "pending" });
+    const next = resetTable(s, s.activeId!);
+    assert.equal(removeDemo(next).activeId, null);
+    assert.equal(next.matches[0].id, "pending");
+    next.activeId = "pending";
+    next.matches[0].status = "finished";
+    assert.equal(removeDemo(next).activeId, null);
+  });
+  it("starts a new independent sheet after closing while keeping the previous result immutable", () => {
+    const s = setup();
+    const oldId = s.activeId!;
+    const closed = finishMatch(s, oldId, "Message", "Remarques");
+    const next = prepareMatch(
+      closed,
+      "",
+      s.teams[0],
+      s.teams[1],
+      s.players,
+      officials,
+    );
+    assert.notEqual(next.activeId, oldId);
+    assert.deepEqual(next.matches[0], closed.matches[0]);
+    assert.equal(next.matches[1].events.length, 0);
+    assert.equal(next.matches[1].remaining, 600);
   });
 });

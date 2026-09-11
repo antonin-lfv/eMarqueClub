@@ -52,6 +52,8 @@ import {
   addMatchPlayer,
   updatePlayerInClub,
   defaults,
+  finishMatch,
+  resetTable,
 } from "@/lib/game";
 import { Court } from "./court";
 import {
@@ -73,17 +75,39 @@ export default function Home() {
   const [tab, setTab] = useState("live"),
     [setupKey, setSetupKey] = useState("first"),
     [help, setHelp] = useState(false),
+    [statsId, setStatsId] = useState<string | null>(null),
     [confirm, setConfirm] = useState<{
       title: string;
       description: string;
       run: () => void;
     } | null>(null);
-  const m = state.matches.find((g) => g.id === state.activeId);
+  const m = state.matches.find(
+    (g) => g.id === state.activeId && g.status !== "finished",
+  );
+  const statsMatch =
+    state.matches.find((g) => g.id === statsId) ?? m ?? state.matches.at(-1);
+  const openMatches = state.matches.filter((g) => g.status !== "finished");
+  function showStats(id?: string) {
+    setStatsId(id ?? m?.id ?? state.matches.at(-1)?.id ?? null);
+    setTab("stats");
+  }
+  function clearPreparation() {
+    setSetupKey(uid());
+    setTab("live");
+  }
+
   const openSetup = () => {
     setTab("setup");
     setSetupKey(uid());
   };
   function requestNew() {
+    if (m) {
+      setTab("live");
+      toast.info(
+        "Terminez ou réinitialisez la rencontre ouverte avant de préparer la suivante.",
+      );
+      return;
+    }
     if (tab === "setup")
       setConfirm({
         title: "Recommencer la préparation ?",
@@ -187,17 +211,13 @@ export default function Home() {
             <Activity />
             Table de marque
           </TabsTrigger>
+          <TabsTrigger className="global-nav-start" value="rules">
+            <SlidersHorizontal />
+            Règlement
+          </TabsTrigger>
           <TabsTrigger value="teams">
             <Users />
             Équipes et joueurs
-          </TabsTrigger>
-          <TabsTrigger value="stats">
-            <BarChart3 />
-            Statistiques
-          </TabsTrigger>
-          <TabsTrigger value="rules">
-            <SlidersHorizontal />
-            Règlement
           </TabsTrigger>
         </TabsList>
         <button
@@ -219,7 +239,9 @@ export default function Home() {
               {tab === "teams"
                 ? "Toute la base du tournoi"
                 : tab === "stats"
-                  ? "Statistiques de la rencontre"
+                  ? statsMatch
+                    ? `Statistiques · ${matchLabel(statsMatch)}`
+                    : "Statistiques des matchs"
                   : tab === "rules"
                     ? "Les règles de votre tournoi"
                     : tab === "setup"
@@ -230,11 +252,11 @@ export default function Home() {
             </h1>
           </div>
           <div className="inline-actions">
-            {m && (
+            {tab === "live" && openMatches.length > (m ? 1 : 0) && (
               <div className="match-picker">
                 <Picker
                   label="Match sélectionné"
-                  value={m.id}
+                  value={m?.id ?? ""}
                   onChange={(id) => {
                     const current = stateRef.current.matches.find(
                       (g) => g.id === stateRef.current.activeId,
@@ -247,7 +269,7 @@ export default function Home() {
                     }
                     void commit({ ...stateRef.current, activeId: id });
                   }}
-                  options={state.matches.map((g) => ({
+                  options={openMatches.map((g) => ({
                     value: g.id,
                     label: `${matchLabel(g)} · ${new Date(g.createdAt).toLocaleDateString("fr-FR")}${g.status === "finished" ? " · Terminé" : ""}`,
                   }))}
@@ -291,7 +313,36 @@ export default function Home() {
           <div className="loading-banner">Chargement du tournoi…</div>
         )}
         <TabsContent value="setup" forceMount hidden={tab !== "setup"}>
-          {loaded && (
+          {loaded && m && (
+            <section className="panel launched-match">
+              <div className="eyebrow">RENCONTRE DÉJÀ OUVERTE</div>
+              <h2>{matchLabel(m)}</h2>
+              <p>
+                L’avant-match sert à lancer une nouvelle rencontre. Cette
+                feuille est déjà ouverte : il n’est pas nécessaire de la
+                relancer pour corriger ses informations.
+              </p>
+              <ul>
+                <li>
+                  <b>Officiels et renforts :</b> modifiables depuis la table de
+                  marque.
+                </li>
+                <li>
+                  <b>Joueurs et couleurs :</b> modifiables dans « Équipes et
+                  joueurs », avec mise à jour du match et confirmation des
+                  changements sensibles.
+                </li>
+                <li>
+                  <b>Équipes engagées et règlement :</b> fixés au lancement. Les
+                  réglages du règlement concernent les prochains matchs.
+                </li>
+              </ul>
+              <button className="button primary" onClick={() => setTab("live")}>
+                Retour à la table de marque
+              </button>
+            </section>
+          )}
+          {loaded && !m && (
             <Prematch
               key={setupKey}
               state={state}
@@ -302,9 +353,9 @@ export default function Home() {
                 const current = stateRef.current.matches.find(
                   (g) => g.id === stateRef.current.activeId,
                 );
-                if (current?.runningUntil && timeLeft(current) > 0) {
+                if (current && current.status !== "finished") {
                   toast.info(
-                    "Mettez le chrono en pause avant d’ouvrir une nouvelle feuille.",
+                    "Terminez ou réinitialisez la rencontre ouverte avant d’en lancer une autre.",
                   );
                   return;
                 }
@@ -325,6 +376,12 @@ export default function Home() {
                 m={m}
                 commit={commit}
                 getState={() => stateRef.current}
+                onStatistics={() => showStats(m.id)}
+                onCleared={clearPreparation}
+                onFinished={() => {
+                  setStatsId(m.id);
+                  clearPreparation();
+                }}
               />
             ) : (
               <section className="panel empty-match">
@@ -336,6 +393,18 @@ export default function Home() {
                 <button className="button primary" onClick={openSetup}>
                   Préparer un match
                 </button>
+                {state.matches.length > 0 && (
+                  <button
+                    className="button secondary"
+                    onClick={() => showStats()}
+                  >
+                    <BarChart3 size={18} />
+                    Statistiques et matchs terminés
+                  </button>
+                )}
+                <p className="muted">
+                  Une rencontre terminée reste conservée dans les statistiques.
+                </p>
               </section>
             ))}
         </TabsContent>
@@ -343,15 +412,33 @@ export default function Home() {
           <Library state={state} commit={commit} busy={!loaded} />
         </TabsContent>
         <TabsContent value="stats">
-          {m ? (
-            <Statistics key={m.id} match={m} />
+          <div className="statistics-navigation">
+            <button className="button secondary" onClick={() => setTab("live")}>
+              <ChevronRight className="back-arrow" size={18} />
+              Retour à la table
+            </button>
+            {statsMatch && (
+              <Picker
+                label="Rencontre à consulter"
+                value={statsMatch.id}
+                onChange={setStatsId}
+                options={state.matches
+                  .toReversed()
+                  .map((g) => ({
+                    value: g.id,
+                    label: `${matchLabel(g)} · ${new Date(g.createdAt).toLocaleDateString("fr-FR")} · ${g.status === "finished" ? "Terminé" : "En cours"}`,
+                  }))}
+              />
+            )}
+            <span className="muted">
+              Consultation uniquement · la table de marque reste inchangée
+            </span>
+          </div>
+          {statsMatch ? (
+            <Statistics key={statsMatch.id} match={statsMatch} />
           ) : (
             <section className="panel empty-match">
-              <h2>Aucune rencontre sélectionnée</h2>
-              <p>
-                Les statistiques apparaîtront après la création du premier
-                match.
-              </p>
+              <h2>Aucune rencontre enregistrée</h2>
             </section>
           )}
         </TabsContent>
@@ -491,7 +578,21 @@ export default function Home() {
               se répercutent dans les matchs non terminés ; les feuilles
               terminées restent figées.
             </li>
-            <li>« Statistiques » concerne uniquement le match sélectionné.</li>
+            <li>
+              Les statistiques sont accessibles depuis la table : consultez le
+              match en cours ou les feuilles terminées, sans changer la
+              rencontre ouverte.
+            </li>
+            <li>
+              L’avant-match prépare une nouvelle feuille. Une fois lancée, les
+              officiels se modifient depuis la table et les couleurs depuis la
+              base.
+            </li>
+            <li>
+              Terminer conserve le résultat et libère la table. Réinitialiser
+              supprime la feuille ouverte après confirmation, sans toucher à la
+              base ni aux matchs terminés.
+            </li>
             <li>
               Sélectionnez un joueur présent puis cliquez sur le terrain : le
               panier est ajouté immédiatement. Annuler corrige en un clic.
@@ -519,11 +620,17 @@ function LiveTable({
   m,
   commit,
   getState,
+  onStatistics,
+  onCleared,
+  onFinished,
 }: {
   state: ClubState;
   m: Match;
   commit: Commit;
   getState: () => ClubState;
+  onStatistics: () => void;
+  onCleared: () => void;
+  onFinished: () => void;
 }) {
   const [selected, setSelected] = useState(""),
     [now, setNow] = useState(Date.now()),
@@ -799,29 +906,25 @@ function LiveTable({
         Départ : {m.startingScore?.home ?? 0}–{m.startingScore?.away ?? 0} ·{" "}
         {m.stage === "final" ? "Phase finale, sans pénalités" : "Poules"}
       </div>
-      <div className="match-tools">
-        <button
-          className="text-button"
-          disabled={finished}
-          onClick={() => setModal("officials")}
-        >
-          <UserRound size={16} />
-          {m.officials.length} officiels
-        </button>
-        <div className="inline-actions">
+      <div className="match-command-bar">
+        <div className="match-command-main">
           <button
-            disabled={finished}
-            className="text-button"
+            className="button secondary"
             onClick={() =>
               void update({ ...current(), swapped: !current().swapped })
             }
           >
-            <ArrowLeftRight size={15} />
+            <ArrowLeftRight size={19} />
             Inverser les côtés
           </button>
           <button
-            className="text-button"
+            className="button primary"
             disabled={left > 0 || finished}
+            title={
+              left > 0
+                ? "Disponible quand le chrono est à zéro"
+                : "Passer à la période suivante"
+            }
             onClick={() => {
               try {
                 void update(nextPeriod(current()));
@@ -831,7 +934,53 @@ function LiveTable({
             }}
           >
             Période suivante
-            <ChevronRight size={15} />
+            <ChevronRight size={19} />
+          </button>
+          <button
+            className="button finish-button"
+            onClick={() => {
+              pause();
+              setModal("finish");
+            }}
+          >
+            <Flag size={19} />
+            Terminer le match
+          </button>
+        </div>
+        <div className="match-command-secondary">
+          <button
+            className="button secondary"
+            onClick={() => setModal("officials")}
+          >
+            <UserRound size={17} />
+            Modifier les officiels · {m.officials.length}
+          </button>
+          <button className="button secondary" onClick={onStatistics}>
+            <BarChart3 size={17} />
+            Statistiques du match
+          </button>
+          <button
+            className="button reset-button"
+            onClick={() =>
+              setConfirmation({
+                title: "Réinitialiser la table de marque ?",
+                description: `La feuille ${matchLabel(m)}, ses scores, son chronomètre et toutes ses actions seront supprimés. La table redeviendra vide pour préparer un autre match. La base des équipes et joueurs et les matchs terminés seront conservés. Cette action est irréversible.`,
+                run: () => {
+                  try {
+                    void commit(
+                      resetTable(getState(), m.id),
+                      "Table réinitialisée",
+                    );
+                    onCleared();
+                  } catch (e) {
+                    toast.error((e as Error).message);
+                  }
+                },
+              })
+            }
+          >
+            <RefreshCw size={17} />
+            Réinitialiser la table
           </button>
         </div>
       </div>
@@ -1071,27 +1220,6 @@ function LiveTable({
         <span className="muted">
           {m.officials.map((o) => `${o.role} : ${o.name}`).join(" · ")}
         </span>
-        <button
-          className="text-button"
-          onClick={() =>
-            finished
-              ? setConfirmation({
-                  title: "Rouvrir cette feuille ?",
-                  description:
-                    "Les scores, actions et remarques restent conservés. Le chrono restera en pause.",
-                  run: () =>
-                    void update({
-                      ...current(),
-                      status: "live",
-                      runningUntil: null,
-                    }),
-                })
-              : (pause(), setModal("finish"))
-          }
-        >
-          <Flag size={15} />
-          {finished ? "Rouvrir pour corriger" : "Terminer le match"}
-        </button>
       </div>
       {adding && (
         <AddRosterPlayer
@@ -1165,17 +1293,16 @@ function LiveTable({
           m={m}
           onClose={() => setModal(null)}
           onSave={(closingMessage, remarks) => {
-            void update(
-              {
-                ...current(),
-                closingMessage,
-                remarks,
-                remaining: timeLeft(current()),
-                runningUntil: null,
-                status: "finished",
-              },
-              "Match terminé",
-            );
+            try {
+              void commit(
+                finishMatch(getState(), m.id, closingMessage, remarks),
+                "Match terminé · table libérée",
+              );
+              onFinished();
+            } catch (e) {
+              toast.error((e as Error).message);
+              return;
+            }
             setModal(null);
           }}
         />
@@ -1314,7 +1441,7 @@ function FinishDialog({
   return (
     <Modal
       title="Terminer la rencontre"
-      description={`${matchLabel(m)} · ${score(m, m.home.id)}–${score(m, m.away.id)}. Le chrono est en pause. Ajoutez vos informations avant de confirmer.`}
+      description={`${matchLabel(m)} · ${score(m, m.home.id)}–${score(m, m.away.id)}. Le chrono est en pause. Après confirmation, la table sera vide et le résultat restera consultable dans les statistiques. La feuille ne pourra plus être rouverte.`}
       onClose={onClose}
     >
       <Field label="Message de fin de match">
@@ -1346,7 +1473,7 @@ function FinishDialog({
         className="button primary"
         onClick={() => onSave(message, remarks)}
       >
-        Confirmer la fin du match
+        Terminer et libérer la table
       </button>
     </Modal>
   );

@@ -168,9 +168,14 @@ export function removeDemo(state: ClubState): ClubState {
   return {
     ...state,
     matches,
-    activeId: matches.some((m) => m.id === state.activeId)
-      ? state.activeId
-      : (matches.at(-1)?.id ?? null),
+    activeId:
+      state.activeId === null
+        ? null
+        : matches.some(
+              (m) => m.id === state.activeId && m.status !== "finished",
+            )
+          ? state.activeId
+          : null,
   };
 }
 export const timeLeft = (m: Match, now = Date.now()) =>
@@ -256,7 +261,9 @@ export function addEvent(
   now = Date.now(),
 ): Match {
   if (m.status === "finished")
-    throw Error("Ce match est terminé. Rouvrez-le pour corriger la feuille.");
+    throw Error(
+      "Ce match est terminé. Sa feuille est conservée en lecture seule.",
+    );
   if (![m.home.id, m.away.id].includes(event.teamId))
     throw Error("Équipe inconnue.");
   const p = m.players.find(
@@ -694,5 +701,42 @@ export function updateTeamInClub(state: ClubState, team: Team): ClubState {
             away: m.away.id === team.id ? team : m.away,
           },
     ),
+  };
+}
+
+// Closing archives the sheet; resetting discards only the unfinished sheet after UI confirmation.
+export function finishMatch(
+  state: ClubState,
+  matchId: string,
+  closingMessage: string,
+  remarks: string,
+  now = Date.now(),
+): ClubState {
+  const m = state.matches.find((m) => m.id === matchId);
+  if (!m || m.status === "finished")
+    throw Error("Cette rencontre est déjà terminée ou indisponible.");
+  const next = {
+    ...m,
+    status: "finished" as const,
+    closingMessage,
+    remarks,
+    remaining: timeLeft(m, now),
+    runningUntil: null,
+  };
+  matchSchema.parse(next);
+  return {
+    ...state,
+    matches: state.matches.map((g) => (g.id === matchId ? next : g)),
+    activeId: state.activeId === matchId ? null : state.activeId,
+  };
+}
+export function resetTable(state: ClubState, matchId: string): ClubState {
+  const m = state.matches.find((m) => m.id === matchId);
+  if (!m || m.status === "finished" || state.activeId !== matchId)
+    throw Error("Cette feuille ne peut pas être réinitialisée.");
+  return {
+    ...state,
+    matches: state.matches.filter((g) => g.id !== matchId),
+    activeId: null,
   };
 }
