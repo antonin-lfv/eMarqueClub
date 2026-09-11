@@ -1,5 +1,5 @@
 import { clubDb } from "@/db/club";
-import { stateSchema, initialState } from "@/lib/game";
+import { stateSchema, initialState, removeDemo } from "@/lib/game";
 export const dynamic = "force-dynamic";
 function authorized(request: Request) {
   return (
@@ -36,6 +36,26 @@ export async function GET(request: Request) {
         .first<{ payload: string; revision: number }>();
     }
     if (!row) throw Error("Missing state");
+    const normalized = removeDemo(JSON.parse(row.payload));
+    if (JSON.stringify(normalized) !== row.payload) {
+      await db
+        .prepare(
+          "UPDATE club_state SET payload = ?, revision = revision + 1, mutation_id = NULL, updated_at = ? WHERE id = ? AND revision = ?",
+        )
+        .bind(
+          JSON.stringify(normalized),
+          new Date().toISOString(),
+          "club",
+          row.revision,
+        )
+        .run();
+      row = await db
+        .prepare("SELECT payload,revision FROM club_state WHERE id = ?")
+        .bind("club")
+        .first<{ payload: string; revision: number }>();
+      if (!row) throw Error("Missing state after cleanup");
+    }
+
     return Response.json(
       { state: JSON.parse(row.payload), revision: row.revision },
       { headers: { "Cache-Control": "no-store" } },
@@ -86,7 +106,7 @@ export async function PUT(request: Request) {
         "UPDATE club_state SET payload = ?, revision = revision + 1, updated_at = ?, mutation_id = ? WHERE id = ? AND revision = ?",
       )
       .bind(
-        JSON.stringify(result.data),
+        JSON.stringify(removeDemo(result.data)),
         new Date().toISOString(),
         data.mutationId ?? null,
         "club",

@@ -1,7 +1,12 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { initialState, stateSchema, type ClubState } from "@/lib/game";
+import {
+  initialState,
+  stateSchema,
+  removeDemo,
+  type ClubState,
+} from "@/lib/game";
 import { SaveQueue, type SaveDraft, type SaveRequest } from "@/lib/save-queue";
 const draftKey = "emarque-pending-v2";
 export function useClub() {
@@ -32,7 +37,13 @@ export function useClub() {
             stateSchema.safeParse(d.state).success &&
             Number.isInteger(d.revision)
           )
-            draft = d;
+            draft = {
+              ...d,
+              state: removeDemo(d.state),
+              request: d.request
+                ? { ...d.request, state: removeDemo(d.request.state) }
+                : null,
+            };
         }
       } catch {
         /* Browser storage may be unavailable; server remains authoritative. */
@@ -52,7 +63,7 @@ export function useClub() {
         return body.revision;
       };
       const q = new SaveQueue<ClubState>(
-        data.state,
+        removeDemo(data.state),
         data.revision,
         send,
         () => {

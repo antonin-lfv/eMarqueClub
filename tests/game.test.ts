@@ -1,288 +1,350 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { fixtureState } from "./fixture.ts";
 import {
   initialState,
-  addEvent,
+  removeDemo,
+  prepareMatch,
+  calculateStartingScore,
+  score,
   stats,
-  excluded,
-  lineup,
-  nextPeriod,
+  addEvent,
+  undoLast,
+  adjustClock,
   timeLeft,
-  shotValue,
-  attackingRight,
+  nextPeriod,
+  timeoutsUsed,
+  excluded,
+  updatePlayerInClub,
+  updateTeamInClub,
+  addMatchPlayer,
   stateSchema,
-  newMatch,
+  shotValue,
+  type Official,
+  type Player,
 } from "../lib/game.ts";
-const match = () => structuredClone(initialState().matches[0]);
-describe("Basketball table rules", () => {
-  it("counts makes, misses and free throws independently", () => {
-    let m = match();
-    m = addEvent(m, {
-      kind: "shot",
-      playerId: "demo-0",
-      teamId: "aigles",
-      x: 2,
-      y: 7,
-      value: 2,
-      made: true,
-    });
-    m = addEvent(m, {
-      kind: "shot",
-      playerId: "demo-0",
-      teamId: "aigles",
-      x: 9,
-      y: 7,
-      value: 3,
-      made: false,
-    });
-    m = addEvent(m, {
-      kind: "free",
-      playerId: "demo-0",
-      teamId: "aigles",
-      value: 1,
-      made: true,
-    });
-    const s = stats(m, "demo-0");
-    assert.equal(s.points, 3);
-    assert.equal(s.field, 2);
-    assert.equal(s.shots, 2);
-    assert.equal(s.made, 1);
-    assert.deepEqual(s.free, [1, 1]);
+const officials: Official[] = [
+  "Marqueur",
+  "Chronométreur",
+  "Arbitre",
+  "Arbitre",
+].map((role, i) => ({
+  id: `o${i}`,
+  name: `Personne ${i}`,
+  role: role as Official["role"],
+  playerId: null,
+}));
+function setup() {
+  const s = fixtureState();
+  s.matches = [];
+  s.activeId = null;
+  s.players[0].license = "current";
+  s.players[1].license = "former";
+  s.players[6].license = "current";
+  s.players[7].license = "current";
+  s.players[8].license = "former";
+  return prepareMatch(s, "", s.teams[0], s.teams[1], s.players, officials);
+}
+const basket = (playerId = "demo-0", teamId = "aigles") => ({
+  kind: "shot" as const,
+  playerId,
+  teamId,
+  value: 2,
+  made: true,
+  x: 25,
+  y: 7.5,
+});
+const loan = (i = 1): Player => ({
+  id: `loan${i}`,
+  name: `Renfort ${i}`,
+  teamId: "aigles",
+  sourceTeamId: "third",
+  number: 40 + i,
+  license: "current",
+  limited: false,
+  cap: null,
+});
+describe("Feuilles Corpo", () => {
+  it("starts empty and removes only the demo while retaining real matches and library", () => {
+    assert.equal(stateSchema.parse(initialState()).activeId, null);
+    const s = setup();
+    s.matches.push({ ...s.matches[0], id: "demo" });
+    s.activeId = "demo";
+    const next = removeDemo(s);
+    assert.equal(next.matches.length, 1);
+    assert.equal(next.activeId, s.matches[0].id);
+    assert.deepEqual(next.players, s.players);
   });
-  it("blocks exceeding 12 field points but allows unlimited free throws and misses", () => {
-    let m = match();
-    for (let i = 0; i < 4; i++)
-      m = addEvent(m, {
-        kind: "shot",
-        playerId: "demo-0",
-        teamId: "aigles",
-        x: 9,
-        y: 7,
-        value: 3,
-        made: true,
-      });
+  it("compensates 4 versus 7 as 3–0 without assigning handicap to player statistics", () => {
+    const m = setup().matches[0];
+    assert.deepEqual(m.startingScore, { home: 3, away: 0 });
+    const after = addEvent(m, basket());
+    assert.equal(score(after, "aigles"), 5);
+    assert.equal(stats(after, "demo-0").points, 2);
+    assert.equal(score(undoLast(after), "aigles"), 3);
+  });
+  it("removes penalties for finals and includes match-only arrival penalties in pools", () => {
+    const m = setup().matches[0];
+    m.players[0].extraPenalty = 1;
+    assert.deepEqual(calculateStartingScore(m), { home: 2, away: 0 });
+    m.stage = "final";
+    assert.deepEqual(calculateStartingScore(m), { home: 0, away: 0 });
+  });
+  it("allows any present player to score and rejects misses and substitutions", () => {
+    const m = setup().matches[0];
+    assert.equal(m.initial, undefined);
+    assert.equal(stats(addEvent(m, basket("demo-5")), "demo-5").points, 2);
+    assert.throws(() => addEvent(m, { ...basket(), made: false }), /marqués/);
     assert.throws(
-      () =>
-        addEvent(m, {
-          kind: "shot",
-          playerId: "demo-0",
-          teamId: "aigles",
-          x: 2,
-          y: 7,
-          value: 2,
-          made: true,
-        }),
-      /Plafond/,
+      () => addEvent(m, { kind: "sub", teamId: "aigles", playerId: "demo-0" }),
+      /changements/,
     );
+  });
+  it("keeps field-point caps, permits free throws beyond the cap, and undoes instantly", () => {
+    let m = setup().matches[0];
+    for (let i = 0; i < 6; i++) m = addEvent(m, basket());
+    assert.throws(() => addEvent(m, basket()), /Plafond/);
     m = addEvent(m, {
       kind: "free",
-      playerId: "demo-0",
       teamId: "aigles",
+      playerId: "demo-0",
       value: 1,
       made: true,
-    });
-    m = addEvent(m, {
-      kind: "shot",
-      playerId: "demo-0",
-      teamId: "aigles",
-      x: 2,
-      y: 7,
-      value: 2,
-      made: false,
     });
     assert.equal(stats(m, "demo-0").points, 13);
+    assert.equal(stats(undoLast(m), "demo-0").points, 12);
   });
-  it("rejects an entire basket when 11+2 exceeds the cap", () => {
-    let m = match();
-    for (const v of [3, 3, 3, 2])
-      m = addEvent(m, {
-        kind: "shot",
-        playerId: "demo-0",
-        teamId: "aigles",
-        x: 9,
-        y: 7,
-        value: v,
-        made: true,
-      });
-    assert.throws(
-      () =>
-        addEvent(m, {
-          kind: "shot",
+  it("excludes after four personal fouls or two unsportsmanlike fouls", () => {
+    for (const type of ["Personnelle", "Antisportive"] as const) {
+      let m = setup().matches[0];
+      for (let i = 0; i < (type === "Personnelle" ? 4 : 2); i++)
+        m = addEvent(m, {
+          kind: "foul",
+          teamId: "aigles",
           playerId: "demo-0",
-          teamId: "aigles",
-          x: 2,
-          y: 7,
-          value: 2,
-          made: true,
-        }),
-      /Plafond/,
-    );
+          foulType: type,
+        });
+      assert.ok(excluded(m, "demo-0"));
+      assert.throws(() => addEvent(m, basket()), /exclu/);
+    }
   });
-  it("excludes after five fouls and allows a replacement into the free place", () => {
-    let m = match();
-    for (let i = 0; i < 5; i++)
-      m = addEvent(m, {
-        kind: "foul",
-        playerId: "demo-0",
-        teamId: "aigles",
-        foulType: "Personnelle",
-      });
-    assert.equal(excluded(m, "demo-0"), true);
-    assert.equal(lineup(m, "aigles").length, 4);
-    assert.throws(
-      () =>
-        addEvent(m, {
-          kind: "free",
-          playerId: "demo-0",
-          teamId: "aigles",
-          made: true,
-        }),
-      /terrain/,
-    );
-    m = addEvent(m, {
-      kind: "sub",
-      teamId: "aigles",
-      playerId: "",
-      otherId: "demo-5",
-    });
-    assert.equal(lineup(m, "aigles").length, 5);
-  });
-  it("excludes for a technical and an unsportsmanlike foul", () => {
-    let m = match();
-    m = addEvent(m, {
-      kind: "foul",
-      teamId: "aigles",
-      playerId: "demo-0",
-      foulType: "Technique",
-    });
-    m = addEvent(m, {
-      kind: "foul",
-      teamId: "aigles",
-      playerId: "demo-0",
-      foulType: "Antisportive",
-    });
-    assert.equal(excluded(m, "demo-0"), true);
-  });
-  it("rejects bench scoring and overfull substitutions", () => {
-    const m = match();
-    assert.throws(
-      () =>
-        addEvent(m, {
-          kind: "shot",
-          teamId: "aigles",
-          playerId: "demo-5",
-          x: 2,
-          y: 7,
-          value: 2,
-          made: true,
-        }),
-      /terrain/,
-    );
-    assert.throws(
-      () =>
-        addEvent(m, {
-          kind: "sub",
-          teamId: "aigles",
-          playerId: "",
-          otherId: "demo-5",
-        }),
-      /sortant/,
-    );
-    const changed = addEvent(m, {
-      kind: "sub",
-      teamId: "aigles",
-      playerId: "demo-0",
-      otherId: "demo-5",
-    });
-    assert.ok(lineup(changed, "aigles").some((p) => p.id === "demo-5"));
-    changed.events[0].voided = true;
-    assert.ok(lineup(changed, "aigles").some((p) => p.id === "demo-0"));
-  });
-  it("enforces timeouts and pauses the running clock", () => {
-    let m = match();
-    m.runningUntil = 110000;
-    m = addEvent(
-      m,
-      { kind: "timeout", teamId: "aigles", playerId: "" },
-      100000,
-    );
-    assert.equal(m.remaining, 10);
-    assert.equal(m.runningUntil, null);
-    for (let i = 0; i < 2; i++)
-      m = addEvent(m, { kind: "timeout", teamId: "aigles", playerId: "" });
+  it("tracks one timeout each half and restores it when undone", () => {
+    let m = setup().matches[0];
+    m = addEvent(m, { kind: "timeout", teamId: "aigles", playerId: "" });
+    assert.equal(timeoutsUsed(m, "aigles"), 1);
     assert.throws(
       () => addEvent(m, { kind: "timeout", teamId: "aigles", playerId: "" }),
-      /temps morts/,
+      /utilisés/,
     );
+    assert.equal(timeoutsUsed(undoLast(m), "aigles"), 0);
+    m.period = 2;
+    assert.equal(timeoutsUsed(m, "aigles"), 0);
   });
-  it("keeps elapsed time accurate regardless of polling intervals", () => {
-    const m = match();
-    m.runningUntil = 160000;
-    assert.equal(timeLeft(m, 100000), 60);
-    assert.equal(timeLeft(m, 130300), 30);
-    assert.equal(timeLeft(m, 200000), 0);
-  });
-  it("allows overtime only at zero and on a tied score", () => {
-    let m = match();
-    assert.throws(() => nextPeriod(m), /zéro/);
-    m.remaining = 0;
-    m.period = 4;
-    m = nextPeriod(m);
-    assert.equal(m.period, 5);
-    assert.equal(m.remaining, 300);
-    m = addEvent(m, {
-      kind: "free",
+  it("uses running Corpo time until final two minutes; free throws always pause", () => {
+    let m = setup().matches[0];
+    m.runningUntil = 301000;
+    const foul = {
+      kind: "foul" as const,
       teamId: "aigles",
       playerId: "demo-0",
-      made: true,
-    });
-    m.remaining = 0;
-    assert.throws(() => nextPeriod(m), /égalité/);
-  });
-  it("detects 2/3 points and reverses hoops at halftime", () => {
-    let m = match();
-    assert.equal(shotValue(m, "aigles", 1.575, 7.5), 2);
-    assert.equal(shotValue(m, "aigles", 8.5, 7.5), 3);
-    assert.equal(shotValue(m, "aigles", 1, 0.5), 3);
-    assert.equal(shotValue(m, "renards", 26.425, 7.5), 2);
-    m.period = 3;
-    assert.equal(attackingRight(m, "aigles"), true);
-    assert.equal(shotValue(m, "aigles", 26.425, 7.5), 2);
-    m.swapped = true;
-    assert.equal(attackingRight(m, "aigles"), false);
-  });
-  it("undo removes points from every aggregate and finished matches reject scoring", () => {
-    let m = match();
-    m = addEvent(m, {
-      kind: "free",
-      teamId: "aigles",
-      playerId: "demo-0",
-      made: true,
-    });
-    m.events[0].voided = true;
-    assert.equal(stats(m).points, 0);
-    assert.equal(stats(m, "demo-0").points, 0);
-    m.status = "finished";
-    assert.throws(
-      () =>
-        addEvent(m, {
+      foulType: "Personnelle" as const,
+    };
+    assert.equal(addEvent(m, foul, 1000).runningUntil, 301000);
+    m.period = 2;
+    m.runningUntil = 121000;
+    assert.equal(addEvent(m, foul, 1000).runningUntil, null);
+    assert.equal(
+      addEvent(
+        { ...m, period: 1 },
+        {
           kind: "free",
           teamId: "aigles",
           playerId: "demo-0",
           made: true,
-        }),
-      /terminé/,
+          value: 1,
+        },
+        1000,
+      ).runningUntil,
+      null,
     );
   });
-  it("copies rosters and rules and validates stored records", () => {
-    const s = initialState();
-    const m = newMatch("Test", s.teams[0], s.teams[1], s.players, s.rules);
-    s.players[0].name = "Changed";
-    s.rules.foulLimit = 3;
-    assert.equal(m.players[0].name, "Lucas Martin");
-    assert.equal(m.rules.foulLimit, 5);
-    assert.equal(stateSchema.safeParse(s).success, true);
-    s.rules.periods = 0;
-    assert.equal(stateSchema.safeParse(s).success, false);
+  it("adjusts clocks within period bounds without changing event timestamps", () => {
+    let m = addEvent(setup().matches[0], basket());
+    const events = m.events;
+    m.remaining = 100;
+    m = adjustClock(m, 10, 1000);
+    assert.equal(m.remaining, 110);
+    m.runningUntil = 101000;
+    m = adjustClock(m, -10, 1000);
+    assert.equal(timeLeft(m, 1000), 90);
+    assert.equal(adjustClock(m, -1000, 1000).runningUntil, null);
+    assert.equal(adjustClock(m, 1000, 1000).remaining, 600);
+    assert.deepEqual(m.events, events);
+  });
+  it("starts overtime only on a tied total score and preserves made baskets", () => {
+    let m = setup().matches[0];
+    m.remaining = 0;
+    m.period = 2;
+    assert.throws(() => nextPeriod(m), /égalité/);
+    m.startingScore = { home: 0, away: 0 };
+    assert.equal(nextPeriod(m).remaining, 180);
+  });
+  it("uses basket position to value shots and reverses ends after halftime", () => {
+    const m = setup().matches[0];
+    assert.equal(shotValue(m, "aigles", 2, 7.5), 2);
+    assert.equal(shotValue(m, "aigles", 14, 7.5), 3);
+    m.period = 2;
+    assert.equal(shotValue(m, "aigles", 26, 7.5), 2);
+  });
+  it("requires unique valid jerseys and known licenses, with no starters required", () => {
+    for (const value of [null, 5, 100]) {
+      const s = fixtureState();
+      s.players[0].number = value;
+      assert.throws(
+        () => prepareMatch(s, "", s.teams[0], s.teams[1], s.players, officials),
+        /maillot/,
+      );
+    }
+    const s = fixtureState();
+    s.players[0].license = undefined;
+    assert.throws(
+      () => prepareMatch(s, "", s.teams[0], s.teams[1], s.players, officials),
+      /licence/,
+    );
+  });
+  it("requires two table staff and one or two distinct referees, outside the present roster", () => {
+    const s = fixtureState(),
+      run = (o: Official[]) =>
+        prepareMatch(s, "", s.teams[0], s.teams[1], s.players, o);
+    assert.doesNotThrow(() => run(officials.slice(0, 3)));
+    assert.throws(() => run(officials.slice(1)), /deux personnes/);
+    assert.throws(() =>
+      run([officials[0], officials[0], ...officials.slice(2)]),
+    );
+    assert.throws(
+      () =>
+        run(
+          officials.map((o, i) =>
+            i === 0 ? { ...o, playerId: s.players[0].id } : o,
+          ),
+        ),
+      /présent/,
+    );
+  });
+  it("remembers first jersey/license but retains previously saved base values", () => {
+    const s = fixtureState();
+    s.players[0].number = null;
+    s.players[0].license = undefined;
+    const roster = s.players.map((p, i) =>
+      i === 0
+        ? { ...p, number: 42, license: "current" as const }
+        : i === 1
+          ? { ...p, number: 43 }
+          : p,
+    );
+    const next = prepareMatch(s, "", s.teams[0], s.teams[1], roster, officials);
+    assert.equal(next.players[0].number, 42);
+    assert.equal(next.players[0].license, "current");
+    assert.equal(next.players[1].number, 5);
+    assert.equal(next.matches.at(-1)!.players[1].number, 43);
+  });
+  it("adds reinforcements mid-match without losing the clock, score events or original team", () => {
+    const s = setup();
+    s.matches[0] = addEvent(s.matches[0], basket());
+    s.matches[0].runningUntil = Date.now() + 100000;
+    const old = s.matches[0];
+    s.players.push({
+      ...loan(),
+      teamId: "third",
+      number: 10,
+      sourceTeamId: undefined,
+    });
+    const next = addMatchPlayer(s, old.id, loan());
+    const m = next.matches[0];
+    assert.deepEqual(m.events, old.events);
+    assert.equal(m.runningUntil, old.runningUntil);
+    assert.deepEqual(m.startingScore, { home: 0, away: 0 });
+    assert.equal(score(m, "aigles"), 2);
+    assert.equal(next.players.at(-1)!.teamId, "third");
+    assert.equal(next.players.at(-1)!.number, 10);
+    assert.equal(m.players.at(-1)!.sourceTeamId, "third");
+  });
+  it("rejects duplicate, official, third reinforcement and overfull additions", () => {
+    let s = setup();
+    const id = s.matches[0].id;
+    assert.throws(() => addMatchPlayer(s, id, s.players[0]), /déjà/);
+    s = addMatchPlayer(s, id, loan(1));
+    s = addMatchPlayer(s, id, loan(2));
+    assert.throws(() => addMatchPlayer(s, id, loan(3)), /Deux renforts/);
+    s.matches[0].rules.maxRoster = 8;
+    assert.throws(
+      () => addMatchPlayer(s, id, { ...loan(3), sourceTeamId: "aigles" }),
+      /maximal/,
+    );
+  });
+  it("propagates important player edits to open matches with warnings, retaining history and finished snapshots", () => {
+    const s = setup();
+    s.matches[0] = addEvent(s.matches[0], basket());
+    s.matches.push({
+      ...structuredClone(s.matches[0]),
+      id: "finished",
+      status: "finished",
+    });
+    const events = s.matches[0].events;
+    const { next, warnings } = updatePlayerInClub(s, {
+      ...s.players[0],
+      name: "Nom corrigé",
+      license: "never",
+      cap: 1,
+    });
+    assert.equal(next.matches[0].players[0].name, "Nom corrigé");
+    assert.deepEqual(next.matches[0].startingScore, { home: 6, away: 0 });
+    assert.deepEqual(next.matches[0].events, events);
+    assert.equal(next.matches[1].players[0].name, s.players[0].name);
+    assert.ok(warnings.some((w) => w.includes("licence")));
+    assert.ok(warnings.some((w) => w.includes("plafond")));
+  });
+  it("keeps an existing match jersey on collision and maintains loan assignment after base edits", () => {
+    const s = setup();
+    const { next, warnings } = updatePlayerInClub(s, {
+      ...s.players[0],
+      number: 5,
+      teamId: "third",
+    });
+    assert.equal(next.matches[0].players[0].number, 4);
+    assert.equal(next.matches[0].players[0].teamId, "aigles");
+    assert.equal(next.matches[0].players[0].sourceTeamId, "third");
+    assert.ok(warnings.length >= 2);
+  });
+  it("propagates colors and linked official names while finished sheets stay frozen", () => {
+    const s = setup();
+    s.matches[0].officials[0].playerId = "outsider";
+    s.matches.push({
+      ...structuredClone(s.matches[0]),
+      id: "finished",
+      status: "finished",
+    });
+    let next = updateTeamInClub(s, { ...s.teams[0], color: "#ff0000" });
+    assert.equal(next.matches[0].home.color, "#ff0000");
+    assert.equal(next.matches[1].home.color, undefined);
+    next = updatePlayerInClub(next, {
+      ...loan(),
+      id: "outsider",
+      name: "Officiel renommé",
+      teamId: "third",
+    }).next;
+    assert.equal(next.matches[0].officials[0].name, "Officiel renommé");
+    assert.equal(next.matches[1].officials[0].name, "Personne 0");
+  });
+  it("persists final messages and remarks through validation and refuses scoring a finished match", () => {
+    const s = setup();
+    Object.assign(s.matches[0], {
+      status: "finished",
+      closingMessage: "Merci à tous",
+      remarks: "Accord adverse reçu\nIncident signalé",
+    });
+    const saved = stateSchema.parse(JSON.parse(JSON.stringify(s)));
+    assert.equal(saved.matches[0].remarks, s.matches[0].remarks);
+    assert.throws(() => addEvent(saved.matches[0], basket()), /terminé/);
   });
 });

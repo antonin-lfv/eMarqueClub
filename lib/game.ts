@@ -8,7 +8,10 @@ export const rulesSchema = z.object({
   foulLimit: z.number().int().min(1).max(12),
   teamFouls: z.number().int().min(1).max(20),
   timeouts: z.number().int().min(0).max(12),
-  onCourt: z.number().int().min(1).max(5),
+  onCourt: z.number().int().min(1).max(5).optional(),
+  timeoutScope: z.enum(["match", "period"]).optional(),
+  clockMode: z.enum(["stopped", "corpo"]).optional(),
+  maxRoster: z.number().int().min(1).max(30).optional(),
   pointCap: z.number().int().min(1).max(100),
 });
 export const playerSchema = z.object({
@@ -19,11 +22,17 @@ export const playerSchema = z.object({
   license: z.enum(["never", "former", "current"]).optional(),
   limited: z.boolean(),
   cap: z.number().int().min(1).max(100).nullable(),
+  sourceTeamId: z.string().optional(),
+  extraPenalty: z.number().int().min(0).max(1).optional(),
 });
 export const teamSchema = z.object({
   id,
   name,
   short: z.string().trim().min(1).max(5),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional(),
 });
 const officialSchema = z.object({
   id,
@@ -71,12 +80,16 @@ export const matchSchema = z.object({
   remaining: z.number().min(0).max(3600),
   runningUntil: z.number().nullable(),
   status: z.enum(["ready", "live", "finished"]),
-  initial: z.array(id).max(10),
+  initial: z.array(id).max(10).optional(),
   events: z.array(eventSchema).max(10000),
   swapped: z.boolean(),
   startingScore: z
     .object({ home: z.number().int().min(0), away: z.number().int().min(0) })
     .optional(),
+  stage: z.enum(["pool", "final"]).optional(),
+  agreement: z.object({ home: z.boolean(), away: z.boolean() }).optional(),
+  closingMessage: z.string().max(2000).optional(),
+  remarks: z.string().max(6000).optional(),
   createdAt: z.string(),
 });
 export const stateSchema = z
@@ -85,11 +98,11 @@ export const stateSchema = z
     players: z.array(playerSchema).max(3000),
     officials: z.array(officialSchema).max(300),
     rules: rulesSchema,
-    matches: z.array(matchSchema).min(1).max(300),
-    activeId: id,
+    matches: z.array(matchSchema).max(300),
+    activeId: id.nullable(),
   })
   .superRefine((s, ctx) => {
-    if (!s.matches.some((m) => m.id === s.activeId))
+    if (s.activeId !== null && !s.matches.some((m) => m.id === s.activeId))
       ctx.addIssue({ code: "custom", message: "Match introuvable" });
   });
 export type Rules = z.infer<typeof rulesSchema>;
@@ -101,13 +114,15 @@ export type Match = z.infer<typeof matchSchema>;
 export type ClubState = z.infer<typeof stateSchema>;
 export const uid = () => crypto.randomUUID();
 export const defaults: Rules = {
-  periods: 4,
+  periods: 2,
   minutes: 10,
-  overtime: 5,
-  foulLimit: 5,
-  teamFouls: 5,
-  timeouts: 3,
-  onCourt: 5,
+  overtime: 3,
+  foulLimit: 4,
+  teamFouls: 7,
+  timeouts: 1,
+  timeoutScope: "period",
+  clockMode: "corpo",
+  maxRoster: 10,
   pointCap: 12,
 };
 export function newMatch(
@@ -123,7 +138,7 @@ export function newMatch(
   );
   return {
     id: uid(),
-    title,
+    title: `${home.name} — ${away.name}`.slice(0, 90),
     home: { ...home },
     away: { ...away },
     players: structuredClone(roster),
@@ -133,67 +148,29 @@ export function newMatch(
     remaining: rules.minutes * 60,
     runningUntil: null,
     status: "ready",
-    initial: [
-      ...roster.filter((p) => p.teamId === home.id).slice(0, rules.onCourt),
-      ...roster.filter((p) => p.teamId === away.id).slice(0, rules.onCourt),
-    ].map((p) => p.id),
     events: [],
     swapped: false,
     createdAt: new Date().toISOString(),
   };
 }
 export function initialState(): ClubState {
-  const teams = [
-    { id: "aigles", name: "Les Aigles", short: "AIG" },
-    { id: "renards", name: "Les Renards", short: "REN" },
-  ];
-  const names = [
-    "Lucas Martin",
-    "Thomas Bernard",
-    "Hugo Petit",
-    "Arthur Moreau",
-    "Louis Dubois",
-    "Nathan Robert",
-    "Maxime Laurent",
-    "Paul Michel",
-    "Alexandre Garcia",
-    "Jules Roux",
-    "Gabriel Simon",
-    "Adam Lefèvre",
-  ];
-  const players = names.map((name, i) => ({
-    id: "demo-" + i,
-    name,
-    number: (i % 6) + 4,
-    teamId: teams[Math.floor(i / 6)].id,
-    limited: i === 0,
-    cap: null,
-  }));
   return {
-    teams,
-    players,
+    teams: [],
+    players: [],
     officials: [],
-    rules: defaults,
-    matches: [
-      {
-        id: "demo",
-        title: "Match de démonstration",
-        home: teams[0],
-        away: teams[1],
-        players,
-        officials: [],
-        rules: defaults,
-        period: 1,
-        remaining: 600,
-        runningUntil: null,
-        status: "ready",
-        initial: players.filter((_, i) => i % 6 < 5).map((p) => p.id),
-        events: [],
-        swapped: false,
-        createdAt: "2026-09-11T00:00:00.000Z",
-      },
-    ],
-    activeId: "demo",
+    rules: { ...defaults },
+    matches: [],
+    activeId: null,
+  };
+}
+export function removeDemo(state: ClubState): ClubState {
+  const matches = state.matches.filter((m) => m.id !== "demo");
+  return {
+    ...state,
+    matches,
+    activeId: matches.some((m) => m.id === state.activeId)
+      ? state.activeId
+      : (matches.at(-1)?.id ?? null),
   };
 }
 export const timeLeft = (m: Match, now = Date.now()) =>
@@ -253,18 +230,6 @@ export function excluded(m: Match, pid: string) {
       .length >= 2
   );
 }
-export function lineup(m: Match, teamId: string) {
-  const set = new Set(m.initial);
-  m.events
-    .filter((e) => !e.voided && e.kind === "sub")
-    .forEach((e) => {
-      set.delete(e.playerId);
-      if (e.otherId) set.add(e.otherId);
-    });
-  return m.players.filter(
-    (p) => p.teamId === teamId && set.has(p.id) && !excluded(m, p.id),
-  );
-}
 export function attackingRight(m: Match, teamId: string) {
   const secondHalf = m.period > Math.ceil(m.rules.periods / 2);
   return (teamId === m.away.id) !== (secondHalf !== m.swapped);
@@ -299,19 +264,10 @@ export function addEvent(
   );
   if (event.kind !== "timeout" && event.kind !== "sub" && !p)
     throw Error("Sélectionnez un joueur.");
-  if (
-    [
-      "shot",
-      "free",
-      "rebound",
-      "assist",
-      "steal",
-      "turnover",
-      "block",
-    ].includes(event.kind) &&
-    !lineup(m, event.teamId).some((p) => p.id === event.playerId)
-  )
-    throw Error("Ce joueur doit être sur le terrain et ne pas être exclu.");
+  if (p && excluded(m, p.id)) throw Error("Ce joueur est exclu.");
+  if (event.kind === "sub") throw Error("Les changements ne sont plus suivis.");
+  if ((event.kind === "shot" || event.kind === "free") && !event.made)
+    throw Error("Seuls les paniers marqués sont saisis.");
   if (event.kind === "shot") {
     if (
       event.x === undefined ||
@@ -331,27 +287,9 @@ export function addEvent(
   }
   if (event.kind === "foul" && p && excluded(m, p.id))
     throw Error("Ce joueur est déjà exclu.");
-  if (event.kind === "sub") {
-    const incoming = m.players.find(
-      (p) => p.id === event.otherId && p.teamId === event.teamId,
-    );
-    const current = lineup(m, event.teamId);
-    if (
-      !incoming ||
-      excluded(m, incoming.id) ||
-      current.some((p) => p.id === incoming.id)
-    )
-      throw Error("Choisissez un joueur disponible sur le banc.");
-    if (event.playerId && !current.some((p) => p.id === event.playerId))
-      throw Error("Le joueur sortant doit être sur le terrain.");
-    if (!event.playerId && current.length >= m.rules.onCourt)
-      throw Error("Choisissez un joueur sortant.");
-  }
   if (
     event.kind === "timeout" &&
-    m.events.filter(
-      (e) => !e.voided && e.kind === "timeout" && e.teamId === event.teamId,
-    ).length >= m.rules.timeouts
+    timeoutsUsed(m, event.teamId) >= m.rules.timeouts
   )
     throw Error("Tous les temps morts de cette équipe ont été utilisés.");
   const e = {
@@ -365,7 +303,11 @@ export function addEvent(
     ...m,
     status: "live",
     events: [...m.events, e],
-    ...(event.kind === "timeout" || event.kind === "foul"
+    ...(event.kind === "timeout" ||
+    event.kind === "free" ||
+    (event.kind === "foul" &&
+      (m.rules.clockMode !== "corpo" ||
+        (m.period >= m.rules.periods && timeLeft(m, now) <= 120)))
       ? { remaining: timeLeft(m, now), runningUntil: null }
       : {}),
   };
@@ -444,8 +386,14 @@ export function prepareMatch(
   away: Team,
   players: Player[],
   officials: Official[],
-  starters: string[],
+  _legacyStarters: string[] = [],
+  options: {
+    stage?: "pool" | "final";
+    agreement?: { home: boolean; away: boolean };
+  } = {},
 ): ClubState {
+  if (players.some((p) => !p.license))
+    throw Error("Renseignez la licence de chaque joueur présent.");
   for (const team of [home, away]) {
     const roster = players.filter((p) => p.teamId === team.id);
     if (!roster.length)
@@ -464,9 +412,15 @@ export function prepareMatch(
       throw Error(
         `Un numéro de maillot est utilisé deux fois chez ${team.name}.`,
       );
-    const target = Math.min(roster.length, state.rules.onCourt);
-    if (roster.filter((p) => starters.includes(p.id)).length !== target)
-      throw Error(`Choisissez ${target} titulaires chez ${team.name}.`);
+    if (roster.length > (state.rules.maxRoster ?? 30))
+      throw Error(
+        `Maximum ${state.rules.maxRoster} joueurs par feuille pour ${team.name}.`,
+      );
+    const borrowed = roster.filter(
+      (p) => p.sourceTeamId && p.sourceTeamId !== p.teamId,
+    );
+    if (borrowed.length > 2)
+      throw Error(`Deux renforts maximum pour ${team.name}.`);
   }
   if (new Set(players.map((p) => p.id)).size !== players.length)
     throw Error("Un joueur figure dans les deux équipes.");
@@ -497,21 +451,16 @@ export function prepareMatch(
     throw Error("Un joueur présent au match ne peut pas être officiel.");
   const m = newMatch(title, home, away, players, state.rules);
   m.officials = structuredClone(officials);
-  m.initial = [...starters];
-  const a = players
-      .filter((p) => p.teamId === home.id)
-      .reduce((n, p) => n + penaltyPoints(p), 0),
-    b = players
-      .filter((p) => p.teamId === away.id)
-      .reduce((n, p) => n + penaltyPoints(p), 0);
-  m.startingScore = { home: Math.max(0, b - a), away: Math.max(0, a - b) };
+  m.stage = options.stage ?? "pool";
+  m.agreement = options.agreement ?? { home: false, away: false };
+  m.startingScore = calculateStartingScore(m);
   const updated = state.players.map((p) => {
     const selected = players.find((j) => j.id === p.id);
     return selected
       ? {
           ...p,
-          number: selected.number,
-          license: selected.license,
+          number: p.number ?? selected.number,
+          license: p.license ?? selected.license,
           limited: selected.limited,
           cap: selected.cap,
         }
@@ -521,7 +470,12 @@ export function prepareMatch(
     ...state,
     players: [
       ...updated,
-      ...players.filter((p) => !updated.some((j) => j.id === p.id)),
+      ...players
+        .filter((p) => !updated.some((j) => j.id === p.id))
+        .map(({ sourceTeamId, extraPenalty, ...p }) => ({
+          ...p,
+          teamId: sourceTeamId ?? p.teamId,
+        })),
     ],
     officials: [
       ...state.officials,
@@ -531,5 +485,214 @@ export function prepareMatch(
     ],
     matches: [...state.matches, m],
     activeId: m.id,
+  };
+}
+export const teamColor = (team: Team, fallback = "#92c5ed") =>
+  team.color ?? fallback;
+export const matchLabel = (m: Match) => `${m.home.name} — ${m.away.name}`;
+export function timeoutsUsed(m: Match, teamId: string) {
+  return m.events.filter(
+    (e) =>
+      !e.voided &&
+      e.kind === "timeout" &&
+      e.teamId === teamId &&
+      (m.rules.timeoutScope !== "period" ||
+        Math.min(e.period, m.rules.periods) ===
+          Math.min(m.period, m.rules.periods)),
+  ).length;
+}
+export function calculateStartingScore(m: Match) {
+  if (m.stage === "final") return { home: 0, away: 0 };
+  const sum = (id: string) =>
+    m.players
+      .filter((p) => p.teamId === id)
+      .reduce((n, p) => n + penaltyPoints(p) + (p.extraPenalty ?? 0), 0);
+  const a = sum(m.home.id),
+    b = sum(m.away.id);
+  return { home: Math.max(0, b - a), away: Math.max(0, a - b) };
+}
+export function matchWarnings(m: Match) {
+  return [m.home, m.away].flatMap((t, i) => {
+    const ps = m.players.filter((p) => p.teamId === t.id);
+    const borrowed = ps.filter(
+      (p) => p.sourceTeamId && p.sourceTeamId !== p.teamId,
+    );
+    return ps.length < 5 || borrowed.length
+      ? [
+          `${t.name} : ${borrowed.length} renfort(s), ${ps.length} présents. ${m.agreement?.[i === 0 ? "home" : "away"] ? "Accord adverse enregistré pour valider le score." : "Accord adverse non enregistré : équipe perdante selon l’article 10 ; résultat à traiter par l’organisateur."}`,
+        ]
+      : [];
+  });
+}
+export function addMatchPlayer(
+  state: ClubState,
+  matchId: string,
+  player: Player,
+): ClubState {
+  const m = state.matches.find((m) => m.id === matchId);
+  if (!m || m.status === "finished")
+    throw Error("Le match est indisponible ou terminé.");
+  if (![m.home.id, m.away.id].includes(player.teamId))
+    throw Error("Équipe inconnue.");
+  if (!player.license) throw Error("Renseignez la licence du joueur.");
+  if (m.players.some((p) => p.id === player.id))
+    throw Error("Ce joueur figure déjà dans cette rencontre.");
+  if (m.officials.some((o) => o.playerId === player.id))
+    throw Error("Ce joueur est déjà officiel du match.");
+  if (
+    player.number === null ||
+    !Number.isInteger(player.number) ||
+    player.number < 0 ||
+    player.number > 99
+  )
+    throw Error("Renseignez un maillot valide.");
+  if (
+    m.players.some(
+      (p) => p.teamId === player.teamId && p.number === player.number,
+    )
+  )
+    throw Error("Ce maillot est déjà utilisé dans cette équipe pour le match.");
+  if (
+    m.players.filter((p) => p.teamId === player.teamId).length >=
+    (m.rules.maxRoster ?? 30)
+  )
+    throw Error("Effectif maximal atteint pour ce match.");
+  const borrowed = player.sourceTeamId && player.sourceTeamId !== player.teamId;
+  if (
+    borrowed &&
+    m.players.filter(
+      (p) =>
+        p.teamId === player.teamId &&
+        p.sourceTeamId &&
+        p.sourceTeamId !== p.teamId,
+    ).length >= 2
+  )
+    throw Error("Deux renforts maximum par équipe.");
+  const next = { ...m, players: [...m.players, player] };
+  next.startingScore = calculateStartingScore(next);
+  const original = state.players.find((p) => p.id === player.id);
+  const base = original
+    ? state.players.map((p) =>
+        p.id === player.id
+          ? {
+              ...p,
+              number: p.number ?? player.number,
+              license: p.license ?? player.license,
+            }
+          : p,
+      )
+    : [
+        ...state.players,
+        {
+          ...player,
+          teamId: player.sourceTeamId ?? player.teamId,
+          sourceTeamId: undefined,
+          extraPenalty: undefined,
+        },
+      ];
+  return {
+    ...state,
+    players: base,
+    matches: state.matches.map((g) => (g.id === m.id ? next : g)),
+  };
+}
+export function updatePlayerInClub(state: ClubState, player: Player) {
+  const warnings: string[] = [];
+  const matches = state.matches.map((m) => {
+    if (m.status === "finished") return m;
+    const before = m.players.find((p) => p.id === player.id);
+    const officials = m.officials.map((o) =>
+      o.playerId === player.id ? { ...o, name: player.name } : o,
+    );
+    if (!before) return { ...m, officials };
+    const baseBefore = state.players.find((p) => p.id === player.id);
+    let number =
+      baseBefore?.number === player.number ? before.number : player.number;
+    if (
+      number === null ||
+      m.players.some(
+        (p) =>
+          p.id !== player.id &&
+          p.teamId === before.teamId &&
+          p.number === number,
+      )
+    ) {
+      number = before.number;
+      if (number !== player.number)
+        warnings.push(
+          `${matchLabel(m)} : maillot ${number} conservé dans le match (numéro vide ou déjà utilisé).`,
+        );
+    }
+    if (
+      (before.sourceTeamId !== undefined &&
+        before.sourceTeamId !== player.teamId) ||
+      (before.sourceTeamId === undefined && before.teamId !== player.teamId)
+    )
+      warnings.push(
+        `${matchLabel(m)} : équipe d’origine modifiée ; le joueur reste affecté à ${before.teamId === m.home.id ? m.home.name : m.away.name} dans la rencontre. Vérifiez les renforts et l’accord adverse.`,
+      );
+    if (number !== before.number)
+      warnings.push(
+        `${matchLabel(m)} : maillot ${before.number} remplacé par ${number}, actions conservées.`,
+      );
+    const after = {
+      ...before,
+      ...player,
+      number,
+      teamId: before.teamId,
+      sourceTeamId: player.teamId,
+      extraPenalty: before.extraPenalty,
+    };
+    const next = {
+      ...m,
+      officials,
+      players: m.players.map((p) => (p.id === player.id ? after : p)),
+    };
+    if (m.startingScore) next.startingScore = calculateStartingScore(next);
+    if (before.license !== after.license) {
+      warnings.push(
+        `${matchLabel(m)} : licence modifiée, score de départ ${m.startingScore?.home ?? 0}–${m.startingScore?.away ?? 0} → ${next.startingScore?.home ?? 0}–${next.startingScore?.away ?? 0}. Les paniers restent conservés.`,
+      );
+    }
+    if (before.limited !== after.limited || before.cap !== after.cap) {
+      warnings.push(
+        `${matchLabel(m)} : plafond modifié pour les prochains paniers ; les points déjà marqués restent acquis.`,
+      );
+      if (
+        after.limited &&
+        stats(m, player.id).field > (after.cap ?? m.rules.pointCap)
+      )
+        warnings.push(
+          `${player.name} a déjà dépassé le nouveau plafond : aucun panier existant ne sera effacé.`,
+        );
+    }
+    return next;
+  });
+  return {
+    next: {
+      ...state,
+      players: state.players.some((p) => p.id === player.id)
+        ? state.players.map((p) => (p.id === player.id ? player : p))
+        : [...state.players, player],
+      matches,
+    },
+    warnings,
+  };
+}
+export function updateTeamInClub(state: ClubState, team: Team): ClubState {
+  return {
+    ...state,
+    teams: state.teams.some((t) => t.id === team.id)
+      ? state.teams.map((t) => (t.id === team.id ? team : t))
+      : [...state.teams, team],
+    matches: state.matches.map((m) =>
+      m.status === "finished"
+        ? m
+        : {
+            ...m,
+            home: m.home.id === team.id ? team : m.home,
+            away: m.away.id === team.id ? team : m.away,
+          },
+    ),
   };
 }

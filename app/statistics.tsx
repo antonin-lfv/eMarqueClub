@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { Download, Target, Trophy, Percent, CircleDot } from "lucide-react";
+import { useState, type CSSProperties } from "react";
+import { Download, Target, Trophy, CircleDot } from "lucide-react";
 import {
   Table,
   TableHeader,
@@ -15,6 +15,8 @@ import {
   periodName,
   score,
   startingPoints,
+  teamColor,
+  matchLabel,
 } from "@/lib/game";
 import { Court } from "./court";
 import { Picker, download } from "./widgets";
@@ -39,7 +41,11 @@ export function Statistics({ match: m }: { match: Match }) {
   );
   const shots = filtered.events.filter(
     (e) =>
-      !e.voided && e.kind === "shot" && e.x !== undefined && e.y !== undefined,
+      !e.voided &&
+      e.made &&
+      e.kind === "shot" &&
+      e.x !== undefined &&
+      e.y !== undefined,
   );
   function csv() {
     const esc = (v: string | number | null) =>
@@ -55,11 +61,8 @@ export function Statistics({ match: m }: { match: Match }) {
         "Joueur",
         "Points",
         "Tirs 2 pts réussis",
-        "Tirs 2 pts tentés",
         "Tirs 3 pts réussis",
-        "Tirs 3 pts tentés",
         "LF réussis",
-        "LF tentés",
         "Fautes",
         "Rebonds",
         "Passes",
@@ -74,9 +77,9 @@ export function Statistics({ match: m }: { match: Match }) {
           p.number,
           p.name,
           s.points,
-          ...s.two,
-          ...s.three,
-          ...s.free,
+          s.two[0],
+          s.three[0],
+          s.free[0],
           s.fouls,
           s.rebounds,
           s.assists,
@@ -93,13 +96,18 @@ export function Statistics({ match: m }: { match: Match }) {
     );
   }
   return (
-    <>
+    <div
+      style={
+        {
+          "--blue": teamColor(m.home),
+          "--coral": teamColor(m.away, "#f2a58c"),
+        } as CSSProperties
+      }
+    >
       <div className="section-heading">
         <div>
           <h2>Chaque action compte.</h2>
-          <p>
-            {m.title} · {m.home.name} — {m.away.name}
-          </p>
+          <p>Match sélectionné : {matchLabel(m)}</p>
         </div>
         <button className="button secondary" onClick={csv}>
           <Download size={16} />
@@ -149,19 +157,12 @@ export function Statistics({ match: m }: { match: Match }) {
           { label: "Points marqués", value: total.points, icon: Trophy },
           {
             label: "Tirs réussis",
-            value: `${total.made} / ${total.shots}`,
+            value: total.made,
             icon: Target,
           },
           {
-            label: "Réussite aux tirs",
-            value: total.shots
-              ? `${Math.round((total.made / total.shots) * 100)} %`
-              : "—",
-            icon: Percent,
-          },
-          {
             label: "Lancers francs",
-            value: `${total.free[0]} / ${total.free[1]}`,
+            value: total.free[0],
             icon: CircleDot,
           },
         ].map((v) => (
@@ -176,7 +177,7 @@ export function Statistics({ match: m }: { match: Match }) {
         <section className="panel shot-chart">
           <div className="section-heading">
             <h2>Carte des tirs</h2>
-            <span className="muted">{shots.length} tentatives</span>
+            <span className="muted">{shots.length} paniers</span>
           </div>
           <Court
             shots={shots.map((e) => ({
@@ -184,14 +185,15 @@ export function Statistics({ match: m }: { match: Match }) {
               x: e.x!,
               y: e.y!,
               made: !!e.made,
-              color: e.teamId === m.home.id ? "#92c5ed" : "#f2a58c",
+              color:
+                e.teamId === m.home.id
+                  ? teamColor(m.home)
+                  : teamColor(m.away, "#f2a58c"),
             }))}
           />
           <div className="chart-legend">
             <span className="blue">● {m.home.name}</span>
             <span className="coral">● {m.away.name}</span>
-            <span>● Réussi</span>
-            <span>⊗ Raté</span>
           </div>
           <p className="footnote">
             Positions réelles sur le terrain, changements de côté inclus. Les
@@ -244,6 +246,14 @@ export function Statistics({ match: m }: { match: Match }) {
           </p>
         </section>
       </div>
+      {(m.closingMessage || m.remarks) && (
+        <section className="panel end-notes">
+          <h2>Message de fin de match</h2>
+          <p>{m.closingMessage || "—"}</p>
+          <h3>Remarques</h3>
+          <p>{m.remarks || "—"}</p>
+        </section>
+      )}
       <section className="panel stats-table">
         <h2>Feuille de statistiques</h2>
         <Table>
@@ -255,7 +265,6 @@ export function Statistics({ match: m }: { match: Match }) {
                 "2 pts",
                 "3 pts",
                 "LF",
-                "Tirs %",
                 "F",
                 "REB",
                 "PD",
@@ -281,14 +290,9 @@ export function Statistics({ match: m }: { match: Match }) {
                   <TableCell>
                     <strong>{s.points}</strong>
                   </TableCell>
-                  <TableCell>{s.two.join("/")}</TableCell>
-                  <TableCell>{s.three.join("/")}</TableCell>
-                  <TableCell>{s.free.join("/")}</TableCell>
-                  <TableCell>
-                    {s.shots
-                      ? Math.round((s.made / s.shots) * 100) + " %"
-                      : "—"}
-                  </TableCell>
+                  <TableCell>{s.two[0]}</TableCell>
+                  <TableCell>{s.three[0]}</TableCell>
+                  <TableCell>{s.free[0]}</TableCell>
                   <TableCell>{s.fouls}</TableCell>
                   <TableCell>{s.rebounds}</TableCell>
                   <TableCell>{s.assists}</TableCell>
@@ -305,6 +309,6 @@ export function Statistics({ match: m }: { match: Match }) {
           interceptions · BP : balles perdues · CTR : contres
         </p>
       </section>
-    </>
+    </div>
   );
 }

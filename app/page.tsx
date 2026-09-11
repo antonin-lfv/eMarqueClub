@@ -1,7 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
-  ClipboardList,
   Activity,
   Users,
   SlidersHorizontal,
@@ -21,29 +20,21 @@ import {
   Download,
   RefreshCw,
   UserRound,
-  Target,
-  CheckCircle2,
-  X,
-  History,
+  ClipboardList,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Toaster, toast } from "sonner";
 import {
   type ClubState,
   type Match,
-  type Team,
   type Player,
-  type GameEvent,
   type Official,
-  adjustClock,
-  undoLast,
-  score,
+  type GameEvent,
   uid,
   stats,
   timeLeft,
   formatTime,
   periodName,
-  lineup,
   excluded,
   addEvent,
   nextPeriod,
@@ -51,6 +42,16 @@ import {
   attackingRight,
   teamFouls,
   eventLabels,
+  adjustClock,
+  undoLast,
+  score,
+  teamColor,
+  matchLabel,
+  timeoutsUsed,
+  matchWarnings,
+  addMatchPlayer,
+  updatePlayerInClub,
+  defaults,
 } from "@/lib/game";
 import { Court } from "./court";
 import {
@@ -61,346 +62,117 @@ import {
   RulesEditor,
   download,
 } from "./widgets";
-import { Library, PlayerForm } from "./library";
+import { Library } from "./library";
 import { Statistics } from "./statistics";
-import { useClub } from "./use-club";
 import { Prematch } from "./prematch";
-type ModalType =
-  | "officials"
-  | "player"
-  | "sub"
-  | "foul"
-  | "other"
-  | "clock"
-  | "help"
-  | null;
+import { AddRosterPlayer, OfficialEditor, defaultOfficials } from "./people";
+import { useClub } from "./use-club";
+type Commit = (state: ClubState, message?: string) => Promise<boolean>;
 export default function Home() {
   const { state, stateRef, loaded, error, pending, commit, retry } = useClub();
-  const busy = !loaded;
   const [tab, setTab] = useState("live"),
-    [selected, setSelected] = useState(""),
-    [modal, setModal] = useState<ModalType>(null),
-    [actionTeam, setActionTeam] = useState(""),
-    [confirm, setConfirm] = useState<"finish" | "reopen" | null>(null),
-    [now, setNow] = useState(Date.now()),
-    [historyAll, setHistoryAll] = useState(false),
-    [missNext, setMissNext] = useState(false),
-    [setupKey, setSetupKey] = useState("initial");
-  const expired = useRef("");
-  const currentMatch = () =>
-    stateRef.current.matches.find((g) => g.id === stateRef.current.activeId)!;
-  const m = state.matches.find((g) => g.id === state.activeId)!;
-  const p = m.players.find((p) => p.id === selected);
-  const left = timeLeft(m, now),
-    finished = m.status === "finished";
-  function undo() {
-    try {
-      void updateMatch(undoLast(currentMatch()));
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
-  }
-  function changeTime(delta: number) {
-    try {
-      void updateMatch(adjustClock(currentMatch(), delta));
-      setNow(Date.now());
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
-  }
-  function updateMatch(next: Match, message?: string) {
-    return commit(
-      {
-        ...stateRef.current,
-        matches: stateRef.current.matches.map((x) =>
-          x.id === next.id ? next : x,
-        ),
-      },
-      message,
-    );
-  }
-  async function action(e: Omit<GameEvent, "id" | "period" | "remaining">) {
-    try {
-      const next = addEvent(currentMatch(), e);
-      if (
-        await updateMatch(
-          next,
-          e.kind === "shot" || e.kind === "free"
-            ? e.made
-              ? `+${e.kind === "free" ? 1 : e.value} point${e.value === 1 ? "" : "s"} · ${p?.name ?? ""}`
-              : "Tir raté enregistré"
-            : `${eventLabels[e.kind]} enregistré`,
-        )
-      ) {
-        setModal(null);
-        if (e.kind === "foul" && excluded(next, e.playerId))
-          toast.warning("Joueur exclu : effectuez son remplacement.");
-        return true;
-      }
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
-    return false;
-  }
-  async function toggleClock() {
-    const m = currentMatch(),
-      left = timeLeft(m);
-    if (m.status === "finished") return;
-    if (left === 0) {
-      toast.info("Passez à la période suivante ou ajustez le chrono.");
-      return;
-    }
-    await updateMatch({
-      ...m,
-      status: "live",
-      remaining: timeLeft(m),
-      runningUntil: m.runningUntil ? null : Date.now() + timeLeft(m) * 1000,
-    });
-  }
-  useEffect(() => {
-    const tick = setInterval(() => setNow(Date.now()), 200);
-    return () => clearInterval(tick);
-  }, []);
-  useEffect(() => {
-    if (
-      m.runningUntil &&
-      left === 0 &&
-      expired.current !== String(m.runningUntil)
-    ) {
-      expired.current = String(m.runningUntil);
-      toast.info(`Fin de ${periodName(m)} — chronomètre à zéro.`, {
-        duration: 8000,
+    [setupKey, setSetupKey] = useState("first"),
+    [help, setHelp] = useState(false),
+    [confirm, setConfirm] = useState<{
+      title: string;
+      description: string;
+      run: () => void;
+    } | null>(null);
+  const m = state.matches.find((g) => g.id === state.activeId);
+  const openSetup = () => {
+    setTab("setup");
+    setSetupKey(uid());
+  };
+  function requestNew() {
+    if (tab === "setup")
+      setConfirm({
+        title: "Recommencer la préparation ?",
+        description:
+          "Les choix non enregistrés de cette préparation seront perdus. Les matchs enregistrés, leurs scores et leurs chronomètres restent conservés.",
+        run: openSetup,
       });
-    }
-  }, [left, m]);
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (
-        (e.target as HTMLElement).closest(
-          'input,textarea,button,[role="dialog"],[role="combobox"]',
-        ) ||
-        modal ||
-        confirm ||
-        tab !== "live"
-      )
-        return;
-      if (e.code === "Space") {
-        e.preventDefault();
-        void toggleClock();
-      }
-      if (e.key === "Escape") {
-        setSelected("");
-      }
+    else openSetup();
+  }
+  function remember(
+    id: string,
+    values: { number?: number; license?: Player["license"] },
+  ) {
+    const s = stateRef.current,
+      p = s.players.find((p) => p.id === id);
+    if (!p) return;
+    const updated = {
+      ...p,
+      number: p.number ?? values.number ?? null,
+      license: p.license ?? values.license,
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  });
-  const contextState = useRef({ state, loaded });
-  contextState.current = { state, loaded };
+    const plan = updatePlayerInClub(s, updated);
+    if (plan.warnings.length)
+      setConfirm({
+        title: "Répercuter cette information dans le match ?",
+        description: plan.warnings.join("\n"),
+        run: () =>
+          void commit(updatePlayerInClub(stateRef.current, updated).next),
+      });
+    else void commit(plan.next);
+  }
+  const toolsState = useRef({ state, loaded });
+  toolsState.current = { state, loaded };
   useEffect(() => {
-    type Context = {
-      registerTool: (
-        tool: unknown,
-        options: { signal: AbortSignal },
-      ) => void | Promise<void>;
-    };
-    const ctx = (document as Document & { modelContext?: Context })
-      .modelContext;
+    const ctx = (
+      document as Document & {
+        modelContext?: {
+          registerTool: (
+            tool: unknown,
+            options: { signal: AbortSignal },
+          ) => Promise<void> | void;
+        };
+      }
+    ).modelContext;
     if (!ctx) return;
-    const controller = new AbortController();
-    const register = async () => {
-      await ctx.registerTool(
+    const c = new AbortController();
+    void Promise.resolve(
+      ctx.registerTool(
         {
           name: "read_basketball_match",
           description:
-            "Lire le score, les effectifs, le chrono et les actions du match actuellement ouvert.",
+            "Lire le score, la feuille et les remarques du match sélectionné.",
           inputSchema: {
             type: "object",
             properties: {},
             additionalProperties: false,
           },
           annotations: { readOnlyHint: true, untrustedContentHint: true },
-          execute: (input: unknown) => {
-            if (
-              !input ||
-              typeof input !== "object" ||
-              Object.keys(input).length
-            )
+          execute: (args: unknown) => {
+            if (!args || typeof args !== "object" || Object.keys(args).length)
               throw Error("Aucun paramètre attendu.");
-            if (!contextState.current.loaded)
-              throw Error("Chargement en cours.");
-            const s = contextState.current.state,
-              g = s.matches.find((m) => m.id === s.activeId)!;
-            return {
-              match: g.title,
-              home: g.home.name,
-              away: g.away.name,
-              score: [score(g, g.home.id), score(g, g.away.id)],
-              period: g.period,
-              seconds: timeLeft(g),
-              status: g.status,
-              players: g.players,
-              events: g.events.filter((e) => !e.voided),
-            };
+            const { state: s, loaded } = toolsState.current;
+            if (!loaded) throw Error("Chargement en cours.");
+            const g = s.matches.find((m) => m.id === s.activeId);
+            return g
+              ? {
+                  match: matchLabel(g),
+                  score: [score(g, g.home.id), score(g, g.away.id)],
+                  period: g.period,
+                  seconds: timeLeft(g),
+                  status: g.status,
+                  players: g.players,
+                  officials: g.officials,
+                  closingMessage: g.closingMessage,
+                  remarks: g.remarks,
+                }
+              : { match: null };
           },
         },
-        { signal: controller.signal },
-      );
-    };
-    void register().catch(() => {});
-    return () => controller.abort();
+        { signal: c.signal },
+      ),
+    ).catch(() => {});
+    return () => c.abort();
   }, []);
-  function selectPlayer(player: Player) {
-    setSelected(player.id);
-    setActionTeam(player.teamId);
-    if (!lineup(m, player.teamId).some((p) => p.id === player.id)) {
-      toast.info(
-        excluded(m, player.id)
-          ? "Ce joueur est exclu."
-          : "Joueur sur le banc : utilisez Changement pour le faire entrer.",
-      );
-    }
-  }
-  function requirePlayer(type: ModalType) {
-    if (!p) {
-      toast.info("Sélectionnez d’abord un joueur dans l’effectif.");
-      return;
-    }
-    setModal(type);
-  }
-  function courtClick(x: number, y: number) {
-    if (!loaded || busy || finished) return;
-    if (!p) {
-      toast.info("Sélectionnez d’abord le joueur qui tire.");
-      return;
-    }
-    if (!lineup(m, p.teamId).some((j) => j.id === p.id)) {
-      toast.error("Ce joueur doit être sur le terrain pour tirer.");
-      return;
-    }
-    const game = currentMatch();
-    void action({
-      kind: "shot",
-      teamId: p.teamId,
-      playerId: p.id,
-      x,
-      y,
-      value: shotValue(game, p.teamId, x, y),
-      made: !missNext,
-    });
-    setMissNext(false);
-  }
-  const activeEvents = m.events.filter((e) => !e.voided),
-    last = activeEvents.at(-1);
-  const onCourtP = p && lineup(m, p.teamId).some((j) => j.id === p.id);
-  function roster(t: Team, side: string) {
-    const ps = m.players.filter((p) => p.teamId === t.id),
-      current = lineup(m, t.id),
-      used = activeEvents.filter(
-        (e) => e.kind === "timeout" && e.teamId === t.id,
-      ).length;
-    return (
-      <section className={"roster " + side}>
-        <div className="roster-title">
-          <span className="team-mini">
-            <Shield size={18} />
-          </span>
-          <h2>{t.name}</h2>
-          <span className="muted">{ps.length} joueurs</span>
-        </div>
-        <div className="roster-head">
-          <span>JOUEUR</span>
-          <span>PTS</span>
-          <span>F</span>
-        </div>
-        {ps.map((player) => {
-          const s = stats(m, player.id),
-            out = excluded(m, player.id),
-            on = current.some((j) => j.id === player.id);
-          return (
-            <button
-              key={player.id}
-              disabled={busy || !loaded}
-              className={
-                "player-row " +
-                (selected === player.id ? "selected " : "") +
-                (out ? "excluded" : "")
-              }
-              onClick={() => selectPlayer(player)}
-              aria-pressed={selected === player.id}
-            >
-              <span className="jersey">{player.number}</span>
-              <span className="player-name">
-                {player.name}
-                <small>
-                  {out ? "Exclu" : on ? "Sur le terrain" : "Sur le banc"}
-                  {player.limited && (
-                    <span className="cap-indicator">
-                      {" "}
-                      · {s.field}/{player.cap ?? m.rules.pointCap} hors LF
-                    </span>
-                  )}
-                </small>
-              </span>
-              <b>{s.points}</b>
-              <span
-                className={
-                  "foul-count " +
-                  (s.fouls >= m.rules.foulLimit - 1 ? "warning" : "")
-                }
-              >
-                {s.fouls}
-              </span>
-            </button>
-          );
-        })}
-        {!ps.length && (
-          <p className="empty-inline">Ajoutez des joueurs pour commencer.</p>
-        )}
-        <button
-          disabled={finished || busy || !loaded}
-          className="add-player"
-          onClick={() => {
-            setActionTeam(t.id);
-            setModal("player");
-          }}
-        >
-          <Plus size={15} />
-          Ajouter un joueur
-        </button>
-        <div className="roster-bottom">
-          <button
-            disabled={finished || busy || !loaded || used >= m.rules.timeouts}
-            onClick={() => {
-              void action({ kind: "timeout", teamId: t.id, playerId: "" });
-            }}
-          >
-            TEMPS MORT <Plus size={12} />
-          </button>
-          <span title={`${used} temps morts utilisés sur ${m.rules.timeouts}`}>
-            {used} / {m.rules.timeouts}
-          </span>
-        </div>
-        {current.length < m.rules.onCourt && (
-          <button
-            className="lineup-warning"
-            onClick={() => {
-              setActionTeam(t.id);
-              setModal("sub");
-            }}
-            disabled={finished}
-          >
-            {current.length}/{m.rules.onCourt} sur le terrain · Compléter
-          </button>
-        )}
-      </section>
-    );
-  }
   return (
-    <Tabs value={tab} onValueChange={setTab} className="application">
+    <Tabs className="application" value={tab} onValueChange={setTab}>
       <Toaster theme="dark" richColors position="bottom-center" />
       <header className="topbar">
-        <a className="brand" href="/">
+        <a href="/" className="brand">
           <span className="brand-icon">
             <CircleDot />
           </span>
@@ -408,7 +180,7 @@ export default function Home() {
         </a>
         <TabsList className="navigation" variant="line">
           <TabsTrigger value="setup">
-            <ClipboardList size={16} />
+            <ClipboardList />
             Avant-match
           </TabsTrigger>
           <TabsTrigger value="live">
@@ -417,7 +189,7 @@ export default function Home() {
           </TabsTrigger>
           <TabsTrigger value="teams">
             <Users />
-            Équipes & joueurs
+            Équipes et joueurs
           </TabsTrigger>
           <TabsTrigger value="stats">
             <BarChart3 />
@@ -430,8 +202,8 @@ export default function Home() {
         </TabsList>
         <button
           className="avatar"
-          onClick={() => setModal("help")}
-          aria-label="Aide à la table de marque"
+          aria-label="Aide"
+          onClick={() => setHelp(true)}
         >
           <CircleHelp size={18} />
         </button>
@@ -440,59 +212,54 @@ export default function Home() {
         <div className="match-heading">
           <div>
             <div className="eyebrow">
-              ESPACE TOURNOI <ChevronRight size={12} />
-              {m.id === "demo"
-                ? "DÉMONSTRATION"
-                : m.status === "finished"
-                  ? "MATCH TERMINÉ"
-                  : "MATCH DE CLUB"}
+              TOURNOI CORPO <ChevronRight size={12} />
+              {m?.status === "finished" ? "MATCH TERMINÉ" : "TABLE DE MARQUE"}
             </div>
             <h1>
-              {tab === "setup"
-                ? "Préparer le prochain match."
-                : tab === "live"
-                  ? "Le match, au bout des doigts."
-                  : tab === "teams"
-                    ? "Le club, côté collectif."
-                    : tab === "stats"
-                      ? "Le match sous tous les angles."
-                      : "Vos tournois, vos règles."}
+              {tab === "teams"
+                ? "Toute la base du tournoi"
+                : tab === "stats"
+                  ? "Statistiques de la rencontre"
+                  : tab === "rules"
+                    ? "Les règles de votre tournoi"
+                    : tab === "setup"
+                      ? "Préparer la rencontre"
+                      : m
+                        ? matchLabel(m)
+                        : "Prêt pour le prochain match ?"}
             </h1>
           </div>
           <div className="inline-actions">
-            <div className="match-picker">
-              <Picker
-                label="Choisir un match"
-                value={m.id}
-                onChange={(id) => {
-                  if (m.runningUntil && left > 0) {
-                    toast.info(
-                      "Mettez le chronomètre en pause avant de changer de match.",
+            {m && (
+              <div className="match-picker">
+                <Picker
+                  label="Match sélectionné"
+                  value={m.id}
+                  onChange={(id) => {
+                    const current = stateRef.current.matches.find(
+                      (g) => g.id === stateRef.current.activeId,
                     );
-                    return;
-                  }
-                  void commit({ ...state, activeId: id }).then((ok) => {
-                    if (ok) {
-                      setSelected("");
+                    if (current?.runningUntil && timeLeft(current) > 0) {
+                      toast.info(
+                        "Mettez le chrono en pause avant de changer de feuille.",
+                      );
+                      return;
                     }
-                  });
-                }}
-                options={state.matches.map((m) => ({
-                  value: m.id,
-                  label:
-                    m.title + (m.status === "finished" ? " · Terminé" : ""),
-                }))}
-              />
-            </div>
+                    void commit({ ...stateRef.current, activeId: id });
+                  }}
+                  options={state.matches.map((g) => ({
+                    value: g.id,
+                    label: `${matchLabel(g)} · ${new Date(g.createdAt).toLocaleDateString("fr-FR")}${g.status === "finished" ? " · Terminé" : ""}`,
+                  }))}
+                />
+              </div>
+            )}
             <button
-              disabled={busy || !loaded}
+              disabled={!loaded}
               className="button secondary"
-              onClick={() => {
-                setSetupKey(uid());
-                setTab("setup");
-              }}
+              onClick={requestNew}
             >
-              <Plus size={17} />
+              <Plus size={16} />
               Nouveau match
             </button>
           </div>
@@ -500,12 +267,16 @@ export default function Home() {
         {error && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
+            <button className="button secondary" onClick={retry}>
+              <RefreshCw size={15} />
+              Réessayer
+            </button>
             {loaded && (
               <button
                 className="button secondary"
                 onClick={() =>
                   download(
-                    "emarque-saisie-en-attente.json",
+                    "emarque-copie-de-secours.json",
                     JSON.stringify(stateRef.current, null, 2),
                     "application/json",
                   )
@@ -514,40 +285,30 @@ export default function Home() {
                 Copie de secours
               </button>
             )}
-            <button
-              className="button secondary"
-              onClick={retry}
-              disabled={busy}
-            >
-              <RefreshCw size={15} />
-              Réessayer
-            </button>
           </div>
         )}
-        {!loaded && !error && (
-          <div className="loading-banner" role="status">
-            Chargement de votre table de marque…
-          </div>
+        {!loaded && (
+          <div className="loading-banner">Chargement du tournoi…</div>
         )}
         <TabsContent value="setup" forceMount hidden={tab !== "setup"}>
           {loaded && (
             <Prematch
               key={setupKey}
               state={state}
+              canCancel={!!m}
+              onSaveKnown={remember}
               onCancel={() => setTab("live")}
               onStart={async (next) => {
-                if (
-                  currentMatch().runningUntil &&
-                  timeLeft(currentMatch()) > 0
-                ) {
+                const current = stateRef.current.matches.find(
+                  (g) => g.id === stateRef.current.activeId,
+                );
+                if (current?.runningUntil && timeLeft(current) > 0) {
                   toast.info(
-                    "Mettez le match en pause avant d’ouvrir une autre feuille.",
+                    "Mettez le chrono en pause avant d’ouvrir une nouvelle feuille.",
                   );
                   return;
                 }
-                if (await commit(next, "Match prêt")) {
-                  setSelected("");
-                  setMissNext(false);
+                if (await commit(next, "Rencontre créée")) {
                   setTab("live");
                   setSetupKey(uid());
                 }
@@ -556,511 +317,134 @@ export default function Home() {
           )}
         </TabsContent>
         <TabsContent value="live">
-          <section className="scoreboard">
-            <div className="score-team blue">
-              <div className="team-badge">
-                <Shield />
-              </div>
-              <div>
-                <small>DOMICILE</small>
-                <h2>{m.home.name}</h2>
-                <span>
-                  Fautes d’équipe <b>{teamFouls(m, m.home.id)}</b>
-                  {teamFouls(m, m.home.id) >= m.rules.teamFouls && (
-                    <em className="bonus">BONUS</em>
-                  )}
-                </span>
-              </div>
-              <strong className="score">
-                {String(score(m, m.home.id)).padStart(2, "0")}
-              </strong>
-            </div>
-            <div className="clock-area">
-              <span className="period">
-                {finished
-                  ? "MATCH TERMINÉ"
-                  : m.period <= m.rules.periods
-                    ? `PÉRIODE ${m.period} / ${m.rules.periods}`
-                    : `PROLONGATION ${m.period - m.rules.periods}`}
-              </span>
-              <button
-                className={"clock " + (left === 0 ? "warning" : "")}
-                onClick={() => setModal("clock")}
-                disabled={finished || busy || !loaded}
-                aria-label="Ajuster le chronomètre"
-              >
-                {formatTime(left)}
-              </button>
-              <button
-                disabled={busy || !loaded || finished || left === 0}
-                className={
-                  "button " +
-                  (m.runningUntil && left > 0 ? "secondary" : "primary")
-                }
-                onClick={() => void toggleClock()}
-              >
-                {m.runningUntil && left > 0 ? (
-                  <Pause size={15} />
-                ) : (
-                  <Play size={15} />
-                )}{" "}
-                {m.runningUntil && left > 0 ? "Pause" : "Démarrer"}
-              </button>
-              <div className="clock-adjustments">
-                {[-60, -10, -1, 1, 10, 60].map((delta) => (
-                  <button
-                    key={delta}
-                    disabled={!loaded || finished}
-                    onClick={() => changeTime(delta)}
-                    aria-label={`${delta > 0 ? "Ajouter" : "Retirer"} ${Math.abs(delta)} secondes`}
-                  >
-                    {delta > 0 ? "+" : "−"}
-                    {Math.abs(delta) === 60 ? "1m" : Math.abs(delta) + "s"}
-                  </button>
-                ))}
-              </div>
-              <span className="clock-hint">
-                {m.runningUntil && left > 0
-                  ? "Chronomètre en cours"
-                  : "Espace : démarrer / pause"}
-              </span>
-            </div>
-            <div className="score-team coral">
-              <strong className="score">
-                {String(score(m, m.away.id)).padStart(2, "0")}
-              </strong>
-              <div>
-                <small>EXTÉRIEUR</small>
-                <h2>{m.away.name}</h2>
-                <span>
-                  Fautes d’équipe <b>{teamFouls(m, m.away.id)}</b>
-                  {teamFouls(m, m.away.id) >= m.rules.teamFouls && (
-                    <em className="bonus">BONUS</em>
-                  )}
-                </span>
-              </div>
-              <div className="team-badge">
-                <Shield />
-              </div>
-            </div>
-          </section>
-          {m.startingScore && (
-            <div className="starting-notice">
-              Score de départ après compensation des pénalités :{" "}
-              <span className="blue">{m.startingScore.home}</span> –{" "}
-              <span className="coral">{m.startingScore.away}</span>
-              <span>Hors statistiques individuelles</span>
-            </div>
-          )}
-          <div className="match-tools">
-            <button
-              className="text-button"
-              disabled={busy || finished || !loaded}
-              onClick={() => setModal("officials")}
-            >
-              <UserRound size={15} />
-              {m.officials.length
-                ? `${m.officials.length} officiel${m.officials.length > 1 ? "s" : ""}`
-                : "Ajouter les officiels"}
-            </button>
-            <div className="inline-actions">
-              <button
-                className="text-button"
-                disabled={busy || finished || !loaded}
-                onClick={() =>
-                  void updateMatch(
-                    { ...m, swapped: !m.swapped },
-                    "Sens d’attaque inversé",
-                  )
-                }
-              >
-                <ArrowLeftRight size={15} />
-                Inverser les côtés
-              </button>
-              <button
-                className="text-button"
-                disabled={left > 0 || finished || busy || !loaded}
-                onClick={() => {
-                  try {
-                    void updateMatch(nextPeriod(m), "Période suivante").then(
-                      (ok) => {
-                        if (ok) setSelected("");
-                      },
-                    );
-                  } catch (e) {
-                    toast.info((e as Error).message);
-                  }
-                }}
-              >
-                Période suivante
-                <ChevronRight size={15} />
-              </button>
-            </div>
-          </div>
-          <div className="live-grid">
-            {roster(m.home, "blue")}
-            <section className="play-panel">
-              <div className="panel-heading">
-                <h2>
-                  <CircleDot size={17} />
-                  Terrain de jeu
-                </h2>
-                <span className="muted">
-                  {p ? `#${p.number} · ${p.name}` : "Tirs à 2 et 3 points"}
-                </span>
-              </div>
-              <div className="quick-shot-tools">
-                <button
-                  className={"button " + (!missNext ? "primary" : "secondary")}
-                  onClick={() => setMissNext(false)}
-                  aria-pressed={!missNext}
-                >
-                  <Check size={15} />
-                  Panier réussi
-                </button>
-                <button
-                  className={
-                    "button " + (missNext ? "miss-active" : "secondary")
-                  }
-                  onClick={() => setMissNext(!missNext)}
-                  aria-pressed={missNext}
-                >
-                  <X size={15} />
-                  Prochain tir raté
-                </button>
-                <button
-                  className="button secondary undo-quick"
-                  disabled={!last || finished}
-                  onClick={undo}
-                >
-                  <Undo2 size={16} />
-                  Annuler
-                </button>
-              </div>
-              <div className="court-wrap">
-                <div className="court-caption">
-                  <span
-                    className={attackingRight(m, m.home.id) ? "coral" : "blue"}
-                  >
-                    ← {attackingRight(m, m.home.id) ? m.away.name : m.home.name}
-                  </span>
-                  <span
-                    className={attackingRight(m, m.home.id) ? "blue" : "coral"}
-                  >
-                    {attackingRight(m, m.home.id) ? m.home.name : m.away.name} →
-                  </span>
-                </div>
-                <Court
-                  onShot={finished ? undefined : courtClick}
-                  shots={activeEvents
-                    .filter(
-                      (e) =>
-                        e.kind === "shot" &&
-                        e.period === m.period &&
-                        (!p || e.playerId === p.id),
-                    )
-                    .map((e) => ({
-                      id: e.id,
-                      x: e.x!,
-                      y: e.y!,
-                      made: !!e.made,
-                      color: e.teamId === m.home.id ? "#92c5ed" : "#f2a58c",
-                    }))}
-                />
-                <div className="court-instruction">
-                  <span className={"step " + (p ? "done" : "")}>
-                    {p ? <Check size={11} /> : 1}
-                  </span>
-                  {p ? `#${p.number} sélectionné` : "Sélectionnez un joueur"}
-                  <span className="step">2</span>Cliquez à l’endroit du tir
-                </div>
-              </div>
-              <div className="action-bar">
-                <button
-                  className="button secondary"
-                  disabled={!onCourtP || finished || busy}
-                  onClick={() =>
-                    p &&
-                    void action({
-                      kind: "free",
-                      teamId: p.teamId,
-                      playerId: p.id,
-                      value: 1,
-                      made: true,
-                    })
-                  }
-                >
-                  +1 Lancer franc
-                </button>
-                <button
-                  className="button secondary"
-                  disabled={!p || finished || busy}
-                  onClick={() =>
-                    p &&
-                    void action({
-                      kind: "foul",
-                      teamId: p.teamId,
-                      playerId: p.id,
-                      foulType: "Personnelle",
-                    })
-                  }
-                >
-                  + Faute
-                </button>
-                <button
-                  className="button secondary"
-                  disabled={finished || busy || !loaded}
-                  onClick={() => {
-                    setActionTeam(p?.teamId ?? m.home.id);
-                    setModal("sub");
-                  }}
-                >
-                  <ArrowLeftRight size={16} />
-                  Changement
-                </button>
-              </div>
-              <div className="extra-actions">
-                <button
-                  className="text-button"
-                  disabled={!onCourtP || finished}
-                  onClick={() =>
-                    p &&
-                    void action({
-                      kind: "free",
-                      teamId: p.teamId,
-                      playerId: p.id,
-                      value: 1,
-                      made: false,
-                    })
-                  }
-                >
-                  LF raté
-                </button>
-                <button
-                  className="text-button"
-                  disabled={!p || finished}
-                  onClick={() => requirePlayer("foul")}
-                >
-                  Autre faute
-                </button>
-                <button
-                  className="text-button"
-                  disabled={!onCourtP || finished || busy}
-                  onClick={() => requirePlayer("other")}
-                >
-                  <Plus size={14} />
-                  Rebond, passe, interception…
-                </button>
-                {selected && (
-                  <button
-                    className="text-button"
-                    onClick={() => {
-                      setSelected("");
-                      setMissNext(false);
-                    }}
-                  >
-                    Désélectionner
-                  </button>
-                )}
-              </div>
-              <div className="tip">
-                <CircleHelp size={16} />
-                <span>
-                  {p?.limited
-                    ? `Plafond : ${stats(m, p.id).field}/${p.cap ?? m.rules.pointCap} points de tirs. Les lancers francs restent autorisés.`
-                    : "Un clic = un panier. La valeur 2 / 3 pts dépend de la position. Annuler revient immédiatement en arrière."}
-                </span>
-              </div>
-            </section>
-            {roster(m.away, "coral")}
-          </div>
-          <section className="history">
-            <div className="panel-heading">
-              <h2>
-                <Activity size={17} />
-                Fil du match<span className="count">{activeEvents.length}</span>
-              </h2>
-              <button
-                className="text-button"
-                disabled={!last || busy || finished}
-                onClick={undo}
-              >
-                <Undo2 size={15} />
-                Annuler la dernière action
-              </button>
-            </div>
-            {!activeEvents.length ? (
-              <div className="empty-inline">
-                Le match commence ici. Les actions apparaîtront au fil du jeu.
-              </div>
+          {loaded &&
+            (m ? (
+              <LiveTable
+                key={m.id}
+                state={state}
+                m={m}
+                commit={commit}
+                getState={() => stateRef.current}
+              />
             ) : (
-              <div className="events">
-                {[...activeEvents]
-                  .reverse()
-                  .slice(0, historyAll ? undefined : 6)
-                  .map((e) => {
-                    const player = m.players.find((p) => p.id === e.playerId);
-                    return (
-                      <div className="event-row" key={e.id}>
-                        <span className="event-time">
-                          {periodName(m, e.period)}{" "}
-                          <b>{formatTime(e.remaining)}</b>
-                        </span>
-                        <span
-                          className={
-                            "event-symbol " +
-                            (e.teamId === m.home.id ? "blue" : "coral")
-                          }
-                        >
-                          {e.kind === "shot" || e.kind === "free" ? (
-                            e.made ? (
-                              `+${e.kind === "free" ? 1 : e.value}`
-                            ) : (
-                              "×"
-                            )
-                          ) : e.kind === "foul" ? (
-                            "F"
-                          ) : e.kind === "timeout" ? (
-                            "TM"
-                          ) : (
-                            <ArrowLeftRight size={15} />
-                          )}
-                        </span>
-                        <span className="event-label">
-                          <b>
-                            {player
-                              ? `#${player.number} ${player.name}`
-                              : e.teamId === m.home.id
-                                ? m.home.name
-                                : m.away.name}
-                          </b>
-                          <small>
-                            {eventLabels[e.kind]}
-                            {e.kind === "shot"
-                              ? ` à ${e.value} pts · ${e.made ? "réussi" : "raté"}`
-                              : e.kind === "free"
-                                ? ` · ${e.made ? "réussi" : "raté"}`
-                                : e.kind === "foul"
-                                  ? ` ${e.foulType?.toLowerCase()}`
-                                  : e.kind === "sub"
-                                    ? ` → ${m.players.find((p) => p.id === e.otherId)?.name}`
-                                    : ""}
-                          </small>
-                        </span>
-                        <span className="event-team">
-                          {e.teamId === m.home.id ? m.home.short : m.away.short}
-                        </span>
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
-            {activeEvents.length > 6 && (
-              <button
-                className="history-toggle"
-                onClick={() => setHistoryAll(!historyAll)}
-              >
-                {historyAll
-                  ? "Réduire le journal"
-                  : `Voir les ${activeEvents.length} actions`}
-              </button>
-            )}
-          </section>
-          <div className="bottom-actions">
-            <span className="muted">
-              {m.officials.map((o) => `${o.role} : ${o.name}`).join(" · ") ||
-                "Aucun officiel affecté à ce match"}
-            </span>
-            <button
-              className="text-button"
-              disabled={busy || !loaded}
-              onClick={() => setConfirm(finished ? "reopen" : "finish")}
-            >
-              <Flag size={15} />
-              {finished ? "Rouvrir pour corriger" : "Terminer le match"}
-            </button>
-          </div>
+              <section className="panel empty-match">
+                <CircleDot size={36} />
+                <h2>Aucun match ouvert</h2>
+                <p>
+                  Préparez les équipes, les joueurs présents et les officiels.
+                </p>
+                <button className="button primary" onClick={openSetup}>
+                  Préparer un match
+                </button>
+              </section>
+            ))}
         </TabsContent>
         <TabsContent value="teams">
-          <Library state={state} commit={commit} busy={busy || !loaded} />
+          <Library state={state} commit={commit} busy={!loaded} />
         </TabsContent>
         <TabsContent value="stats">
-          <Statistics key={m.id} match={m} />
+          {m ? (
+            <Statistics key={m.id} match={m} />
+          ) : (
+            <section className="panel empty-match">
+              <h2>Aucune rencontre sélectionnée</h2>
+              <p>
+                Les statistiques apparaîtront après la création du premier
+                match.
+              </p>
+            </section>
+          )}
         </TabsContent>
         <TabsContent value="rules">
           <div className="section-heading">
             <div>
-              <h2>Un règlement à la mesure de votre tournoi.</h2>
-              <p>Ces paramètres seront utilisés pour les prochains matchs.</p>
+              <h2>Règlement des prochains matchs</h2>
+              <p>
+                Les rencontres déjà créées conservent leurs durées et règles.
+              </p>
             </div>
-            <span className="tag">RÈGLES PERSONNALISÉES</span>
+            <button
+              className="button secondary"
+              onClick={() =>
+                setConfirm({
+                  title: "Appliquer le préréglage Corpo 2025 ?",
+                  description:
+                    "Les paramètres des prochains matchs seront remplacés. Aucun match existant, score ou chrono ne sera remis à zéro.",
+                  run: () =>
+                    void commit(
+                      { ...stateRef.current, rules: { ...defaults } },
+                      "Règles Corpo 2025 appliquées",
+                    ),
+                })
+              }
+            >
+              Préréglage Corpo 2025
+            </button>
           </div>
           <div className="rules-layout">
             <section className="panel">
               <RulesEditor
                 key={JSON.stringify(state.rules)}
                 initial={state.rules}
-                busy={busy || !loaded}
+                busy={!loaded}
                 onSave={(r) =>
                   void commit(
-                    { ...state, rules: r },
-                    "Règlement enregistré pour les prochains matchs",
+                    { ...stateRef.current, rules: r },
+                    "Règlement enregistré",
                   )
                 }
               />
             </section>
             <aside>
               <section className="panel rule-note">
-                <Shield size={26} />
-                <h2>Les joueurs à points limités</h2>
+                <Clock3 />
+                <h2>Chrono Corpo</h2>
                 <p>
-                  Activez la limite dans la fiche du joueur. Le plafond porte
-                  sur les paniers à 2 et 3 points ; les lancers francs ne le
-                  consomment pas.
+                  2 × 10 min, prolongation de 3 min, mi-temps de 5 min. Arrêt
+                  sur temps mort et lancers francs. En dehors des deux dernières
+                  minutes du match ou d’une prolongation, les fautes simples
+                  n’arrêtent pas automatiquement le chrono.
                 </p>
                 <p>
-                  Un tir réussi dépassant le plafond est refusé en entier. Les
-                  tirs ratés restent enregistrables.
+                  Les sorties et autres arrêts restent à saisir avec Pause. Une
+                  séquence de lancers francs possède son bouton de pause.
                 </p>
               </section>
               <section className="panel rule-note">
-                <Clock3 size={26} />
-                <h2>Règles du match ouvert</h2>
+                <Shield />
+                <h2>Points à vérifier avec l’organisateur</h2>
                 <p>
-                  {m.rules.periods} × {m.rules.minutes} minutes · Prolongation{" "}
-                  {m.rules.overtime} min
-                  <br />
-                  {m.rules.foulLimit} fautes avant exclusion · {m.rules.onCourt}{" "}
-                  joueurs sur le terrain
-                  <br />
-                  {m.rules.timeouts} temps morts par équipe et par match
+                  5 joueurs minimum, 10 par feuille, 15 dans l’effectif du
+                  tournoi. Deux renforts maximum ; accord adverse pour valider
+                  le score. Les licences de compétition nécessitent
+                  l’autorisation préalable de l’organisateur.
                 </p>
                 <p>
-                  Les côtés s’inversent à mi-match. Les deux fautes techniques /
-                  antisportives combinées ou une disqualifiante entraînent aussi
-                  l’exclusion.
+                  Les pénalités 0 / 1 / 3 ne concernent que les poules. Un
+                  nouvel arrivant peut recevoir +1 point sur un match. L’option
+                  se trouve dans l’ajout de joueur.
                 </p>
                 <p>
-                  Les lancers francs après faute se saisissent manuellement.
+                  Le plafond de 12 points hors LF est votre règle complémentaire
+                  : il ne figure pas dans le PDF fourni.
                 </p>
               </section>
             </aside>
           </div>
           <section className="panel backup-panel">
             <div>
-              <h2>Conserver une copie du tournoi</h2>
+              <h2>Archive du tournoi</h2>
               <p>
-                Une archive contient la base, les matchs, les actions et les
-                positions de tirs.
+                Base, feuilles, positions des paniers et remarques de fin de
+                match.
               </p>
             </div>
             <button
               className="button secondary"
-              disabled={!loaded}
               onClick={() =>
                 download(
                   "emarque-tournoi.json",
-                  JSON.stringify(state, null, 2),
+                  JSON.stringify(stateRef.current, null, 2),
                   "application/json",
                 )
               }
@@ -1078,614 +462,815 @@ export default function Home() {
             ? error
               ? "Sauvegarde en attente · saisie conservée ici"
               : "Sauvegarde en arrière-plan…"
-            : !loaded
-              ? "Connexion à la sauvegarde…"
-              : error
-                ? "Action non enregistrée"
-                : "Toutes les actions sont enregistrées"}
+            : loaded
+              ? "Toutes les actions sont enregistrées"
+              : "Connexion…"}
         </span>
-        <span>eMarque Club · Tournois internes & corpo</span>
+        <span>eMarque Club · Tournois internes et corpo</span>
       </footer>
-      {modal === "player" && (
-        <AddMatchPlayer
-          state={state}
-          m={m}
-          teamId={actionTeam}
-          busy={busy}
-          onClose={() => setModal(null)}
-          onSave={async (player, addToBase) => {
-            if (player.number === null) {
-              toast.error("Renseignez un numéro de maillot pour ce match.");
-              return;
-            }
-
-            if (
-              m.players.some(
-                (p) =>
-                  p.id === player.id ||
-                  (p.teamId === player.teamId && p.number === player.number),
-              )
-            ) {
-              toast.error(
-                "Ce joueur ou ce numéro figure déjà dans l’effectif.",
-              );
-              return;
-            }
-            const next = { ...m, players: [...m.players, player] };
-            if (lineup(m, player.teamId).length < m.rules.onCourt)
-              next.initial = [...m.initial, player.id];
-            if (
-              await commit(
-                {
-                  ...state,
-                  players: addToBase
-                    ? [...state.players, player]
-                    : state.players,
-                  matches: state.matches.map((g) => (g.id === m.id ? next : g)),
-                },
-                "Joueur ajouté au match",
-              )
-            )
-              setModal(null);
-          }}
-        />
-      )}
-      {modal === "sub" && (
-        <SubModal
-          m={m}
-          teamId={actionTeam || m.home.id}
-          busy={busy}
-          onClose={() => setModal(null)}
-          onSave={(e) => void action(e)}
-        />
-      )}
-      {modal === "officials" && (
-        <OfficialsModal
-          state={state}
-          m={m}
-          busy={busy}
-          onClose={() => setModal(null)}
-          onSave={async (official) => {
-            if (
-              m.officials.filter((o) => o.role === official.role).length >=
-              (official.role === "Arbitre" ? 2 : 1)
-            ) {
-              toast.error(
-                "Ce rôle est déjà pourvu (deux arbitres maximum). Retirez un officiel avant de le réattribuer.",
-              );
-              return;
-            }
-            if (
-              m.officials.some(
-                (o) =>
-                  o.name.toLocaleLowerCase("fr") ===
-                  official.name.toLocaleLowerCase("fr"),
-              )
-            ) {
-              toast.error("Cette personne est déjà affectée à ce match.");
-              return;
-            }
-            if (
-              await commit(
-                {
-                  ...state,
-                  officials: state.officials.some((o) => o.id === official.id)
-                    ? state.officials
-                    : [...state.officials, official],
-                  matches: state.matches.map((g) =>
-                    g.id === m.id
-                      ? { ...m, officials: [...m.officials, official] }
-                      : g,
-                  ),
-                },
-                "Officiel ajouté",
-              )
-            )
-              return true;
-            return false;
-          }}
-          onRemove={(id) =>
-            void updateMatch(
-              { ...m, officials: m.officials.filter((o) => o.id !== id) },
-              "Officiel retiré",
-            )
-          }
-        />
-      )}
-      {modal === "clock" && (
-        <ClockModal
-          m={m}
-          busy={busy}
-          onClose={() => setModal(null)}
-          onSave={async (seconds) => {
-            if (
-              await updateMatch(
-                { ...m, remaining: seconds, runningUntil: null },
-                "Chronomètre ajusté et mis en pause",
-              )
-            )
-              setModal(null);
-          }}
-        />
-      )}
-      {modal === "foul" && p && (
-        <Modal
-          title={`Faute · #${p.number} ${p.name}`}
-          description="Le chronomètre sera mis en pause. Saisissez ensuite les éventuels lancers francs."
-          onClose={() => setModal(null)}
-        >
-          <div className="choice-grid">
-            {(
-              [
-                "Personnelle",
-                "Technique",
-                "Antisportive",
-                "Disqualifiante",
-              ] as const
-            ).map((type) => (
-              <button
-                className="button secondary"
-                disabled={busy}
-                key={type}
-                onClick={() =>
-                  void action({
-                    kind: "foul",
-                    teamId: p.teamId,
-                    playerId: p.id,
-                    foulType: type,
-                  })
-                }
-              >
-                {type}
-              </button>
-            ))}
-          </div>
-        </Modal>
-      )}
-      {modal === "other" && p && (
-        <Modal
-          title={`Action · #${p.number} ${p.name}`}
-          description="Complétez les statistiques individuelles de ce joueur."
-          onClose={() => setModal(null)}
-        >
-          <div className="choice-grid">
-            {(["rebound", "assist", "steal", "turnover", "block"] as const).map(
-              (kind) => (
-                <button
-                  className="button secondary"
-                  disabled={busy}
-                  key={kind}
-                  onClick={() =>
-                    void action({ kind, teamId: p.teamId, playerId: p.id })
-                  }
-                >
-                  {eventLabels[kind]}
-                </button>
-              ),
-            )}
-          </div>
-        </Modal>
-      )}
-      {modal === "help" && (
-        <Modal
-          title="Prêt pour l’entre-deux ?"
-          description="Une table de marque pour vos tournois de club, indépendante du logiciel officiel."
-          onClose={() => setModal(null)}
-        >
-          <ol className="help-list">
-            <li>
-              Créez les équipes et les joueurs, puis choisissez le règlement
-              avant de créer le match.
-            </li>
-            <li>
-              Dans Avant-match, cochez les joueurs présents et les titulaires,
-              renseignez les maillots, les licences et les officiels.
-            </li>
-            <li>
-              Sélectionnez un joueur et cliquez sur le terrain : le panier est
-              ajouté immédiatement. Pour un échec, activez « Prochain tir raté
-              ». Annuler corrige en un clic.
-            </li>
-            <li>
-              La touche Espace démarre ou arrête le chrono. Cliquez sur le temps
-              pour le corriger. Les fautes et temps morts mettent le chrono en
-              pause.
-            </li>
-            <li>
-              Annulez la dernière action pour corriger une erreur. Consultez et
-              exportez les statistiques pendant ou après le match.
-            </li>
-          </ol>
-          <p className="footnote">
-            Les actions apparaissent immédiatement et se sauvegardent en
-            arrière-plan. Gardez la page ouverte tant que la sauvegarde est en
-            attente. Une copie temporaire de cette session protège la saisie
-            lors d’un rechargement. Utilisez une seule table de saisie par
-            tournoi.
-          </p>
-        </Modal>
-      )}
       {confirm && (
         <Confirm
-          title={
-            confirm === "finish" ? "Terminer ce match ?" : "Rouvrir le match ?"
-          }
-          description={
-            confirm === "finish"
-              ? "Le chronomètre sera arrêté et la feuille sera verrouillée. Vous pourrez la rouvrir."
-              : "La saisie sera de nouveau disponible, chrono en pause."
-          }
+          title={confirm.title}
+          description={confirm.description}
           onClose={() => setConfirm(null)}
           onConfirm={() => {
-            if (confirm === "finish")
-              void updateMatch(
-                {
-                  ...m,
-                  status: "finished",
-                  remaining: timeLeft(m),
-                  runningUntil: null,
-                },
-                "Match terminé",
-              );
-            else if (confirm === "reopen")
-              void updateMatch(
-                { ...m, status: "live", runningUntil: null },
-                "Match rouvert",
-              );
+            confirm.run();
             setConfirm(null);
           }}
         />
       )}
+      {help && (
+        <Modal
+          title="Une table de marque simplifiée"
+          description="Base du tournoi et feuilles de match."
+          onClose={() => setHelp(false)}
+        >
+          <ul className="help-list">
+            <li>
+              « Équipes et joueurs » contient toute la base. Les modifications
+              se répercutent dans les matchs non terminés ; les feuilles
+              terminées restent figées.
+            </li>
+            <li>« Statistiques » concerne uniquement le match sélectionné.</li>
+            <li>
+              Sélectionnez un joueur présent puis cliquez sur le terrain : le
+              panier est ajouté immédiatement. Annuler corrige en un clic.
+            </li>
+            <li>
+              Ajouter un joueur ne réinitialise ni les paniers ni le chrono. Les
+              changements de score de départ demandent une confirmation.
+            </li>
+            <li>
+              Les prêts ne modifient pas l’équipe d’origine dans la base. Les
+              maillots peuvent être adaptés pour une rencontre.
+            </li>
+            <li>
+              Gardez la page ouverte jusqu’à la fin de la sauvegarde en
+              arrière-plan.
+            </li>
+          </ul>
+        </Modal>
+      )}
     </Tabs>
   );
 }
-function AddMatchPlayer({
+function LiveTable({
   state,
   m,
-  teamId,
-  busy,
-  onClose,
-  onSave,
+  commit,
+  getState,
 }: {
   state: ClubState;
   m: Match;
-  teamId: string;
-  busy: boolean;
-  onClose: () => void;
-  onSave: (p: Player, add: boolean) => void;
+  commit: Commit;
+  getState: () => ClubState;
 }) {
-  const [source, setSource] = useState("new"),
-    [existing, setExisting] = useState("");
-  const available = state.players.filter(
-    (p) => !m.players.some((j) => j.id === p.id),
-  );
-  const team = m.home.id === teamId ? m.home : m.away;
-  return (
-    <Modal
-      title={`Ajouter un joueur · ${team.name}`}
-      description="Le joueur rejoint ce match. Un nouveau joueur est aussi ajouté à la base."
-      onClose={onClose}
-    >
-      <Picker
-        label="Origine du joueur"
-        value={source}
-        onChange={setSource}
-        options={[
-          { value: "new", label: "Créer un joueur à la volée" },
-          { value: "existing", label: "Choisir dans la base" },
-        ]}
-      />
-      {source === "new" ? (
-        <PlayerForm
-          state={{ ...state, teams: [team] }}
-          teamId={teamId}
-          busy={busy}
-          onSave={(p) => onSave(p, true)}
-        />
-      ) : (
-        <>
-          <Picker
-            label="Joueur existant"
-            value={existing}
-            onChange={setExisting}
-            options={available.map((p) => ({
-              value: p.id,
-              label: `#${p.number} ${p.name} · ${state.teams.find((t) => t.id === p.teamId)?.name ?? "Sans équipe"}`,
-            }))}
-          />
-          {!available.length && (
-            <p className="footnote">
-              Tous les joueurs de la base figurent déjà dans ce match.
-            </p>
-          )}
-          <button
-            disabled={busy || !existing}
-            className="button primary"
-            onClick={() => {
-              const p = available.find((p) => p.id === existing);
-              if (p) onSave({ ...p, teamId }, false);
-            }}
-          >
-            Ajouter au match
-          </button>
-        </>
-      )}
-    </Modal>
-  );
-}
-function SubModal({
-  m,
-  teamId,
-  busy,
-  onClose,
-  onSave,
-}: {
-  m: Match;
-  teamId: string;
-  busy: boolean;
-  onClose: () => void;
-  onSave: (e: Omit<GameEvent, "id" | "period" | "remaining">) => void;
-}) {
-  const [team, setTeam] = useState(teamId),
-    [out, setOut] = useState("none"),
-    [incoming, setIncoming] = useState("");
-  const current = lineup(m, team),
-    bench = m.players.filter(
-      (p) =>
-        p.teamId === team &&
-        !current.some((c) => c.id === p.id) &&
-        !excluded(m, p.id),
+  const [selected, setSelected] = useState(""),
+    [now, setNow] = useState(Date.now()),
+    [modal, setModal] = useState<
+      "clock" | "foul" | "other" | "officials" | "finish" | null
+    >(null),
+    [adding, setAdding] = useState<string | null>(null),
+    [showAll, setShowAll] = useState(false),
+    [confirmation, setConfirmation] = useState<{
+      title: string;
+      description: string;
+      run: () => void;
+    } | null>(null);
+  const p = m.players.find((p) => p.id === selected),
+    left = timeLeft(m, now),
+    finished = m.status === "finished",
+    eligible = !!p && !excluded(m, p.id),
+    active = m.events.filter(
+      (e) =>
+        !e.voided &&
+        e.kind !== "sub" &&
+        !(["shot", "free"].includes(e.kind) && !e.made),
+    ),
+    last = m.events.findLast(
+      (e) =>
+        !e.voided &&
+        e.kind !== "sub" &&
+        !(["shot", "free"].includes(e.kind) && !e.made),
     );
+  const current = () => getState().matches.find((g) => g.id === m.id)!;
+  const update = (next: Match, message?: string) =>
+    commit(
+      {
+        ...getState(),
+        matches: getState().matches.map((g) => (g.id === next.id ? next : g)),
+      },
+      message,
+    );
+  function record(event: Omit<GameEvent, "id" | "period" | "remaining">) {
+    try {
+      void update(addEvent(current(), event));
+      setModal(null);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+  function undo() {
+    if (!last || finished) return;
+    const game = current();
+    void update({
+      ...game,
+      events: game.events.map((e) =>
+        e.id === last.id ? { ...e, voided: true } : e,
+      ),
+    });
+  }
+  function pause() {
+    const g = current();
+    if (g.status === "finished") return;
+    void update({ ...g, remaining: timeLeft(g), runningUntil: null });
+  }
+  function toggle() {
+    const g = current(),
+      remaining = timeLeft(g);
+    if (g.status === "finished" || remaining === 0) return;
+    void update({
+      ...g,
+      status: "live",
+      remaining,
+      runningUntil: g.runningUntil ? null : Date.now() + remaining * 1000,
+    });
+    setNow(Date.now());
+  }
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 200);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (
+        modal ||
+        adding ||
+        confirmation ||
+        (e.target as Element).closest(
+          'input,textarea,button,[role="dialog"],[role="combobox"]',
+        )
+      )
+        return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        toggle();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+        e.preventDefault();
+        undo();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  });
+  function teamPanel(team: Match["home"], color: string) {
+    const ps = m.players.filter((p) => p.teamId === team.id);
+    return (
+      <section className="roster" style={{ color }}>
+        <div className="roster-title">
+          <Shield size={18} />
+          <h2>{team.name}</h2>
+          <span className="muted">{ps.length} présents</span>
+        </div>
+        <div className="roster-head">
+          <span>JOUEUR</span>
+          <span>PTS</span>
+          <span>F</span>
+        </div>
+        {ps.map((player) => {
+          const s = stats(m, player.id);
+          return (
+            <button
+              className={
+                "player-row " +
+                (player.id === selected ? "selected " : "") +
+                (excluded(m, player.id) ? "excluded" : "")
+              }
+              key={player.id}
+              aria-pressed={player.id === selected}
+              onClick={() => setSelected(player.id)}
+            >
+              <span className="jersey">{player.number}</span>
+              <span className="player-name">
+                {player.name}
+                <small>
+                  {excluded(m, player.id)
+                    ? "Exclu"
+                    : player.sourceTeamId &&
+                        player.sourceTeamId !== player.teamId
+                      ? "Renfort"
+                      : player.limited
+                        ? `${s.field}/${player.cap ?? m.rules.pointCap} hors LF`
+                        : ""}
+                </small>
+              </span>
+              <b>{s.points}</b>
+              <span className="foul-count">{s.fouls}</span>
+            </button>
+          );
+        })}
+        <button
+          className="add-player"
+          disabled={finished}
+          onClick={() => setAdding(team.id)}
+        >
+          <Plus size={15} />
+          Compléter depuis la base
+        </button>
+      </section>
+    );
+  }
+  const colors = {
+    [m.home.id]: teamColor(m.home),
+    [m.away.id]: teamColor(m.away, "#f2a58c"),
+  };
+  const notices = matchWarnings(m);
   return (
-    <Modal
-      title="Changement de joueur"
-      description="Choisissez le joueur sortant et le joueur entrant. Un joueur exclu est déjà retiré du terrain."
-      onClose={onClose}
-    >
-      <Picker
-        label="Équipe"
-        value={team}
-        onChange={(t) => {
-          setTeam(t);
-          setOut("none");
-          setIncoming("");
-        }}
-        options={[m.home, m.away].map((t) => ({ value: t.id, label: t.name }))}
-      />
-      <Field label="Joueur sortant">
-        <Picker
-          label="Joueur sortant"
-          value={out}
-          onChange={setOut}
-          options={[
-            {
-              value: "none",
-              label:
-                current.length < m.rules.onCourt
-                  ? "Compléter une place libre"
-                  : "Choisissez un joueur sortant",
-            },
-            ...current.map((p) => ({
-              value: p.id,
-              label: `#${p.number} ${p.name}`,
-            })),
-          ]}
-        />
-      </Field>
-      <Field label="Joueur entrant">
-        <Picker
-          label="Joueur entrant"
-          value={incoming}
-          onChange={setIncoming}
-          options={bench.map((p) => ({
-            value: p.id,
-            label: `#${p.number} ${p.name}`,
-          }))}
-        />
-      </Field>
-      {!bench.length && (
-        <p className="footnote">
-          Aucun joueur disponible sur le banc. Ajoutez un joueur à l’effectif.
-        </p>
-      )}
-      <button
-        className="button primary"
-        disabled={
-          busy ||
-          !incoming ||
-          (out === "none" && current.length >= m.rules.onCourt)
-        }
-        onClick={() =>
-          onSave({
-            kind: "sub",
-            teamId: team,
-            playerId: out === "none" ? "" : out,
-            otherId: incoming,
-          })
-        }
-      >
-        Valider le changement
-      </button>
-    </Modal>
-  );
-}
-function OfficialsModal({
-  state,
-  m,
-  busy,
-  onClose,
-  onSave,
-  onRemove,
-}: {
-  state: ClubState;
-  m: Match;
-  busy: boolean;
-  onClose: () => void;
-  onSave: (o: Official) => Promise<boolean | undefined>;
-  onRemove: (id: string) => void;
-}) {
-  const [source, setSource] = useState("new"),
-    [name, setName] = useState(""),
-    [person, setPerson] = useState(""),
-    [role, setRole] = useState<Official["role"]>("Arbitre");
-  const available = state.players.filter(
-    (p) => !m.players.some((j) => j.id === p.id),
-  );
-  return (
-    <Modal
-      title="Les officiels du match"
-      description="Affectez un joueur d’une autre équipe, une personne enregistrée ou un nouvel officiel."
-      onClose={onClose}
-    >
-      {m.officials.length > 0 && (
-        <div className="official-list">
-          {m.officials.map((o) => (
-            <div key={o.id}>
-              <span>
-                <b>{o.name}</b>
-                <small>{o.role}</small>
+    <>
+      <section className="scoreboard">
+        {[m.home, null, m.away].map((team, i) =>
+          team ? (
+            <div
+              key={team.id}
+              className={"score-team " + (i === 2 ? "away-score" : "")}
+              style={{ color: colors[team.id] }}
+            >
+              {i === 2 && (
+                <strong className="score">
+                  {String(score(m, team.id)).padStart(2, "0")}
+                </strong>
+              )}
+              <div className="team-badge">
+                <Shield />
+              </div>
+              <div>
+                <small>{i === 0 ? "DOMICILE" : "EXTÉRIEUR"}</small>
+                <h2>{team.name}</h2>
+                <span>
+                  Fautes <b>{teamFouls(m, team.id)}</b>
+                  {teamFouls(m, team.id) >= m.rules.teamFouls && (
+                    <em className="bonus">2 LF</em>
+                  )}
+                </span>
+                <div className="score-timeouts">
+                  <span>Temps morts</span>
+                  <b>
+                    {timeoutsUsed(m, team.id)} / {m.rules.timeouts}
+                  </b>
+                  <button
+                    aria-label={`Temps mort ${team.name}`}
+                    disabled={
+                      finished || timeoutsUsed(m, team.id) >= m.rules.timeouts
+                    }
+                    onClick={() =>
+                      record({ kind: "timeout", teamId: team.id, playerId: "" })
+                    }
+                  >
+                    <Plus size={14} />
+                  </button>
+                  <small>
+                    {m.rules.timeoutScope === "period"
+                      ? `cette ${m.rules.periods === 2 ? "mi-temps" : "période"}`
+                      : "sur le match"}
+                  </small>
+                </div>
+              </div>
+              {i === 0 && (
+                <strong className="score">
+                  {String(score(m, team.id)).padStart(2, "0")}
+                </strong>
+              )}
+            </div>
+          ) : (
+            <div key="clock" className="clock-area">
+              <span className="period">
+                {finished
+                  ? "MATCH TERMINÉ"
+                  : `${periodName(m)} / ${m.rules.periods}`}
               </span>
               <button
-                className="icon-button"
-                aria-label={`Retirer ${o.name}`}
-                disabled={busy}
-                onClick={() => onRemove(o.id)}
+                disabled={finished}
+                className={"clock " + (left === 0 ? "warning" : "")}
+                onClick={() => setModal("clock")}
+                aria-label="Régler le chrono"
               >
-                <X size={16} />
+                {formatTime(left)}
               </button>
+              <button
+                className={
+                  "button " +
+                  (m.runningUntil && left > 0 ? "secondary" : "primary")
+                }
+                disabled={finished || left === 0}
+                onClick={toggle}
+              >
+                {m.runningUntil && left > 0 ? (
+                  <Pause size={15} />
+                ) : (
+                  <Play size={15} />
+                )}{" "}
+                {m.runningUntil && left > 0 ? "Pause" : "Démarrer"}
+              </button>
+              <div className="clock-adjustments">
+                {[-60, -10, -1, 1, 10, 60].map((delta) => (
+                  <button
+                    key={delta}
+                    disabled={finished}
+                    onClick={() => {
+                      try {
+                        void update(adjustClock(current(), delta));
+                        setNow(Date.now());
+                      } catch (e) {
+                        toast.error((e as Error).message);
+                      }
+                    }}
+                  >
+                    {delta > 0 ? "+" : "−"}
+                    {Math.abs(delta) === 60 ? "1m" : Math.abs(delta) + "s"}
+                  </button>
+                ))}
+              </div>
             </div>
+          ),
+        )}
+      </section>
+      <div className="starting-notice">
+        Départ : {m.startingScore?.home ?? 0}–{m.startingScore?.away ?? 0} ·{" "}
+        {m.stage === "final" ? "Phase finale, sans pénalités" : "Poules"}
+      </div>
+      <div className="match-tools">
+        <button
+          className="text-button"
+          disabled={finished}
+          onClick={() => setModal("officials")}
+        >
+          <UserRound size={16} />
+          {m.officials.length} officiels
+        </button>
+        <div className="inline-actions">
+          <button
+            disabled={finished}
+            className="text-button"
+            onClick={() =>
+              void update({ ...current(), swapped: !current().swapped })
+            }
+          >
+            <ArrowLeftRight size={15} />
+            Inverser les côtés
+          </button>
+          <button
+            className="text-button"
+            disabled={left > 0 || finished}
+            onClick={() => {
+              try {
+                void update(nextPeriod(current()));
+              } catch (e) {
+                toast.info((e as Error).message);
+              }
+            }}
+          >
+            Période suivante
+            <ChevronRight size={15} />
+          </button>
+        </div>
+      </div>
+      <div className="live-grid">
+        {teamPanel(m.home, colors[m.home.id])}
+        <section className="play-panel">
+          <div className="panel-heading">
+            <h2>
+              <CircleDot size={17} />
+              Paniers marqués
+            </h2>
+            <span className="muted">
+              {p ? `#${p.number} · ${p.name}` : "Sélectionnez un joueur"}
+            </span>
+          </div>
+          <div className="quick-shot-tools">
+            <span className="muted">Un clic sur le terrain = un panier</span>
+            <button
+              className="button secondary undo-quick"
+              disabled={!last || finished}
+              onClick={undo}
+            >
+              <Undo2 size={16} />
+              Annuler
+            </button>
+          </div>
+          <div className="court-wrap">
+            <div className="court-caption">
+              <span
+                style={{
+                  color:
+                    colors[
+                      attackingRight(m, m.home.id) ? m.away.id : m.home.id
+                    ],
+                }}
+              >
+                ← {attackingRight(m, m.home.id) ? m.away.name : m.home.name}
+              </span>
+              <span
+                style={{
+                  color:
+                    colors[
+                      attackingRight(m, m.home.id) ? m.home.id : m.away.id
+                    ],
+                }}
+              >
+                {attackingRight(m, m.home.id) ? m.home.name : m.away.name} →
+              </span>
+            </div>
+            <Court
+              onShot={
+                finished
+                  ? undefined
+                  : (x, y) => {
+                      if (!p) {
+                        toast.info("Sélectionnez le joueur qui marque.");
+                        return;
+                      }
+                      record({
+                        kind: "shot",
+                        teamId: p.teamId,
+                        playerId: p.id,
+                        x,
+                        y,
+                        value: shotValue(current(), p.teamId, x, y),
+                        made: true,
+                      });
+                    }
+              }
+              shots={active
+                .filter(
+                  (e) =>
+                    e.kind === "shot" &&
+                    e.period === m.period &&
+                    (!p || e.playerId === p.id),
+                )
+                .map((e) => ({
+                  id: e.id,
+                  x: e.x!,
+                  y: e.y!,
+                  made: true,
+                  color: colors[e.teamId],
+                }))}
+            />
+            <div className="court-instruction">
+              <span className="step">1</span>
+              {p ? `#${p.number} sélectionné` : "Choisissez le joueur"}
+              <span className="step">2</span>Cliquez sur le terrain
+            </div>
+          </div>
+          <div className="action-bar">
+            <button
+              className="button secondary"
+              disabled={!eligible || finished}
+              onClick={() =>
+                p &&
+                record({
+                  kind: "free",
+                  teamId: p.teamId,
+                  playerId: p.id,
+                  value: 1,
+                  made: true,
+                })
+              }
+            >
+              +1 Lancer franc
+            </button>
+            <button
+              className="button secondary"
+              disabled={!eligible || finished}
+              onClick={() =>
+                p &&
+                record({
+                  kind: "foul",
+                  teamId: p.teamId,
+                  playerId: p.id,
+                  foulType: "Personnelle",
+                })
+              }
+            >
+              + Faute
+            </button>
+            <button
+              className="button secondary"
+              disabled={finished}
+              onClick={pause}
+            >
+              <Pause size={15} />
+              Séquence LF
+            </button>
+          </div>
+          <div className="extra-actions">
+            <button
+              className="text-button"
+              disabled={!eligible || finished}
+              onClick={() => setModal("foul")}
+            >
+              Autre faute
+            </button>
+            <button
+              className="text-button"
+              disabled={!eligible || finished}
+              onClick={() => setModal("other")}
+            >
+              Rebond, passe…
+            </button>
+            <button className="text-button" onClick={() => setSelected("")}>
+              Désélectionner
+            </button>
+          </div>
+          <div className="tip">
+            <CircleHelp size={15} />
+            {p?.limited
+              ? `${stats(m, p.id).field}/${p.cap ?? m.rules.pointCap} points hors LF. Les lancers francs restent autorisés.`
+              : "Les positions des paniers sont conservées. Annuler ne modifie ni le chrono ni le score de départ."}
+          </div>
+        </section>
+        {teamPanel(m.away, colors[m.away.id])}
+      </div>
+      <section className="history">
+        <div className="panel-heading">
+          <h2>
+            <Activity size={16} />
+            Fil du match <span className="count">{active.length}</span>
+          </h2>
+          <button
+            className="text-button"
+            disabled={!last || finished}
+            onClick={undo}
+          >
+            <Undo2 size={15} />
+            Annuler la dernière action
+          </button>
+        </div>
+        {active.length === 0 ? (
+          <p className="empty-inline">Les actions apparaîtront ici.</p>
+        ) : (
+          active
+            .toReversed()
+            .slice(0, showAll ? undefined : 6)
+            .map((e) => (
+              <div className="event-row" key={e.id}>
+                <span className="event-time">
+                  {periodName(m, e.period)} <b>{formatTime(e.remaining)}</b>
+                </span>
+                <span
+                  className="event-symbol"
+                  style={{ color: colors[e.teamId] }}
+                >
+                  {e.kind === "shot"
+                    ? `+${e.value}`
+                    : e.kind === "free"
+                      ? "+1"
+                      : e.kind === "foul"
+                        ? "F"
+                        : e.kind === "timeout"
+                          ? "TM"
+                          : "·"}
+                </span>
+                <span className="event-label">
+                  <b>
+                    {m.players.find((p) => p.id === e.playerId)?.name ??
+                      (e.teamId === m.home.id ? m.home.name : m.away.name)}
+                  </b>
+                  <small>
+                    {eventLabels[e.kind]} {e.foulType ?? ""}
+                  </small>
+                </span>
+              </div>
+            ))
+        )}
+        {active.length > 6 && (
+          <button
+            className="history-toggle"
+            onClick={() => setShowAll(!showAll)}
+          >
+            {showAll ? "Réduire" : "Toutes les actions"}
+          </button>
+        )}
+      </section>
+      {notices.length > 0 && (
+        <div className="notice roster-notice">
+          {notices.map((n) => (
+            <p key={n}>{n}</p>
           ))}
         </div>
       )}
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          const saved = state.officials.find((o) => o.id === person);
-          const player = available.find((p) => p.id === person);
-          const o: Official = {
-            id:
-              source === "saved"
-                ? (saved?.id ?? uid())
-                : source === "player"
-                  ? (state.officials.find((o) => o.playerId === person)?.id ??
-                    uid())
-                  : uid(),
-            name:
-              source === "new"
-                ? name
-                : source === "player"
-                  ? (player?.name ?? "")
-                  : (saved?.name ?? ""),
-            role,
-            playerId:
-              source === "player"
-                ? person
-                : source === "saved"
-                  ? (saved?.playerId ?? null)
-                  : null,
-          };
-          if (!o.name.trim()) {
-            toast.error("Choisissez une personne.");
-            return;
+      {finished && (m.closingMessage || m.remarks) && (
+        <section className="panel end-notes">
+          <h2>Message de fin de match</h2>
+          <p>{m.closingMessage || "—"}</p>
+          <h3>Remarques</h3>
+          <p>{m.remarks || "—"}</p>
+        </section>
+      )}
+      <div className="bottom-actions">
+        <span className="muted">
+          {m.officials.map((o) => `${o.role} : ${o.name}`).join(" · ")}
+        </span>
+        <button
+          className="text-button"
+          onClick={() =>
+            finished
+              ? setConfirmation({
+                  title: "Rouvrir cette feuille ?",
+                  description:
+                    "Les scores, actions et remarques restent conservés. Le chrono restera en pause.",
+                  run: () =>
+                    void update({
+                      ...current(),
+                      status: "live",
+                      runningUntil: null,
+                    }),
+                })
+              : (pause(), setModal("finish"))
           }
-          if (await onSave(o)) {
-            setName("");
-            setPerson("");
-          }
-        }}
-      >
-        <Field label="Rôle">
-          <Picker
-            label="Rôle"
-            value={role}
-            onChange={(r) => setRole(r as Official["role"])}
-            options={[
-              "Arbitre",
-              "Marqueur",
-              "Chronométreur",
-              "Aide-marqueur",
-            ].map((r) => ({ value: r, label: r }))}
-          />
-        </Field>
-        <Field label="Personne">
-          <Picker
-            label="Origine de l’officiel"
-            value={source}
-            onChange={(v) => {
-              setSource(v);
-              setPerson("");
-            }}
-            options={[
-              { value: "new", label: "Nouvelle personne" },
-              { value: "player", label: "Joueur d’une autre équipe" },
-              { value: "saved", label: "Officiel déjà enregistré" },
-            ]}
-          />
-        </Field>
-        {source === "new" ? (
-          <Field label="Nom et prénom">
-            <input
-              required
-              maxLength={90}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </Field>
-        ) : (
-          <Field label={source === "player" ? "Joueur" : "Officiel"}>
-            <Picker
-              label="Choisir la personne"
-              value={person}
-              onChange={setPerson}
-              options={(source === "player"
-                ? available
-                : state.officials.filter(
-                    (o) =>
-                      !o.playerId ||
-                      !m.players.some((p) => p.id === o.playerId),
-                  )
-              ).map((p) => ({ value: p.id, label: p.name }))}
-            />
-          </Field>
-        )}
-        <div className="form-actions">
-          <button className="button primary" disabled={busy}>
-            Ajouter l’officiel
-          </button>
-        </div>
-      </form>
-    </Modal>
+        >
+          <Flag size={15} />
+          {finished ? "Rouvrir pour corriger" : "Terminer le match"}
+        </button>
+      </div>
+      {adding && (
+        <AddRosterPlayer
+          state={state}
+          team={adding === m.home.id ? m.home : m.away}
+          roster={m.players}
+          officials={m.officials}
+          onClose={() => setAdding(null)}
+          onSave={(player) => {
+            try {
+              const next = addMatchPlayer(getState(), m.id, player),
+                changed = next.matches.find((g) => g.id === m.id)!;
+              setAdding(null);
+              setConfirmation({
+                title: `Ajouter ${player.name} au match ?`,
+                description: `Score de départ : ${m.startingScore?.home ?? 0}–${m.startingScore?.away ?? 0} → ${changed.startingScore?.home ?? 0}–${changed.startingScore?.away ?? 0}. Tous les paniers, fautes et le chronomètre sont conservés. ${matchWarnings(changed).join(" ")}`,
+                run: () => {
+                  try {
+                    void commit(
+                      addMatchPlayer(getState(), m.id, player),
+                      "Joueur ajouté",
+                    );
+                  } catch (e) {
+                    toast.error((e as Error).message);
+                  }
+                },
+              });
+            } catch (e) {
+              toast.error((e as Error).message);
+            }
+          }}
+        />
+      )}
+      {modal === "clock" && (
+        <ClockEditor
+          m={m}
+          onClose={() => setModal(null)}
+          onSave={(seconds) => {
+            void update({
+              ...current(),
+              remaining: seconds,
+              runningUntil: null,
+            });
+            setModal(null);
+          }}
+        />
+      )}
+      {modal === "officials" && (
+        <OfficialsDialog
+          state={state}
+          m={m}
+          onClose={() => setModal(null)}
+          onSave={(officials) => {
+            const names = officials.map((o) => o.name.trim().toLowerCase());
+            if (
+              officials.some((o) => !o.name.trim()) ||
+              new Set(names).size !== names.length
+            ) {
+              toast.error(
+                "Chaque poste doit être attribué à une personne différente.",
+              );
+              return;
+            }
+            void update({ ...current(), officials });
+            setModal(null);
+          }}
+        />
+      )}
+      {modal === "finish" && (
+        <FinishDialog
+          m={m}
+          onClose={() => setModal(null)}
+          onSave={(closingMessage, remarks) => {
+            void update(
+              {
+                ...current(),
+                closingMessage,
+                remarks,
+                remaining: timeLeft(current()),
+                runningUntil: null,
+                status: "finished",
+              },
+              "Match terminé",
+            );
+            setModal(null);
+          }}
+        />
+      )}
+      {(modal === "foul" || modal === "other") && p && (
+        <Modal
+          title={`${modal === "foul" ? "Faute" : "Action"} · ${p.name}`}
+          description="Sélectionnez l’action à enregistrer."
+          onClose={() => setModal(null)}
+        >
+          <div className="choice-grid">
+            {modal === "foul"
+              ? (
+                  [
+                    "Personnelle",
+                    "Technique",
+                    "Antisportive",
+                    "Disqualifiante",
+                  ] as const
+                ).map((foulType) => (
+                  <button
+                    className="button secondary"
+                    key={foulType}
+                    onClick={() =>
+                      record({
+                        kind: "foul",
+                        playerId: p.id,
+                        teamId: p.teamId,
+                        foulType,
+                      })
+                    }
+                  >
+                    {foulType}
+                  </button>
+                ))
+              : (
+                  ["rebound", "assist", "steal", "turnover", "block"] as const
+                ).map((kind) => (
+                  <button
+                    className="button secondary"
+                    key={kind}
+                    onClick={() =>
+                      record({ kind, playerId: p.id, teamId: p.teamId })
+                    }
+                  >
+                    {eventLabels[kind]}
+                  </button>
+                ))}
+          </div>
+        </Modal>
+      )}
+      {confirmation && (
+        <Confirm
+          title={confirmation.title}
+          description={confirmation.description}
+          onClose={() => setConfirmation(null)}
+          onConfirm={() => {
+            confirmation.run();
+            setConfirmation(null);
+          }}
+        />
+      )}
+    </>
   );
 }
-function ClockModal({
+function ClockEditor({
   m,
-  busy,
-  onClose,
   onSave,
+  onClose,
 }: {
   m: Match;
-  busy: boolean;
+  onSave: (s: number) => void;
   onClose: () => void;
-  onSave: (seconds: number) => void;
 }) {
   const [minutes, setMinutes] = useState(Math.floor(timeLeft(m) / 60)),
     [seconds, setSeconds] = useState(timeLeft(m) % 60);
-  const max =
-    (m.period > m.rules.periods ? m.rules.overtime : m.rules.minutes) * 60;
   return (
     <Modal
-      title="Ajuster le chronomètre"
-      description="La validation met le chrono en pause. Les actions déjà saisies conservent leur horodatage."
+      title="Régler le chronomètre"
+      description="Le chrono sera mis en pause. Les actions déjà saisies sont conservées."
       onClose={onClose}
     >
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (minutes * 60 + seconds > max) {
-            toast.error("Le temps dépasse la durée prévue pour cette période.");
+          const total = minutes * 60 + seconds;
+          if (
+            total >
+            (m.period > m.rules.periods ? m.rules.overtime : m.rules.minutes) *
+              60
+          ) {
+            toast.error("La durée dépasse celle de la période.");
             return;
           }
-          onSave(minutes * 60 + seconds);
+          onSave(total);
         }}
       >
         <div className="form-grid">
@@ -1694,8 +1279,8 @@ function ClockModal({
               type="number"
               min={0}
               max={60}
-              required
               value={minutes}
+              required
               onChange={(e) => setMinutes(Number(e.target.value))}
             />
           </Field>
@@ -1704,16 +1289,97 @@ function ClockModal({
               type="number"
               min={0}
               max={59}
-              required
               value={seconds}
+              required
               onChange={(e) => setSeconds(Number(e.target.value))}
             />
           </Field>
         </div>
-        <button className="button primary" disabled={busy}>
-          Appliquer le temps
-        </button>
+        <button className="button primary">Appliquer</button>
       </form>
+    </Modal>
+  );
+}
+function FinishDialog({
+  m,
+  onSave,
+  onClose,
+}: {
+  m: Match;
+  onSave: (message: string, remarks: string) => void;
+  onClose: () => void;
+}) {
+  const [message, setMessage] = useState(m.closingMessage ?? ""),
+    [remarks, setRemarks] = useState(m.remarks ?? "");
+  return (
+    <Modal
+      title="Terminer la rencontre"
+      description={`${matchLabel(m)} · ${score(m, m.home.id)}–${score(m, m.away.id)}. Le chrono est en pause. Ajoutez vos informations avant de confirmer.`}
+      onClose={onClose}
+    >
+      <Field label="Message de fin de match">
+        <textarea
+          rows={3}
+          maxLength={2000}
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder="Message aux organisateurs…"
+        />
+      </Field>
+      <Field label="Remarques">
+        <textarea
+          rows={5}
+          maxLength={6000}
+          value={remarks}
+          onChange={(e) => setRemarks(e.target.value)}
+          placeholder="Incidents, accord adverse, particularités…"
+        />
+      </Field>
+      {matchWarnings(m).length > 0 && (
+        <div className="notice">
+          {matchWarnings(m).map((x) => (
+            <p key={x}>{x}</p>
+          ))}
+        </div>
+      )}
+      <button
+        className="button primary"
+        onClick={() => onSave(message, remarks)}
+      >
+        Confirmer la fin du match
+      </button>
+    </Modal>
+  );
+}
+function OfficialsDialog({
+  state,
+  m,
+  onSave,
+  onClose,
+}: {
+  state: ClubState;
+  m: Match;
+  onSave: (o: Official[]) => void;
+  onClose: () => void;
+}) {
+  const [officials, setOfficials] = useState(
+    m.officials.length >= 3 ? m.officials : defaultOfficials(),
+  );
+  return (
+    <Modal
+      title="Officiels de la rencontre"
+      description="Deux personnes à la table, un ou deux arbitres."
+      onClose={onClose}
+    >
+      <OfficialEditor
+        state={state}
+        players={m.players}
+        officials={officials}
+        onChange={setOfficials}
+      />
+      <button className="button primary" onClick={() => onSave(officials)}>
+        Enregistrer les officiels
+      </button>
     </Modal>
   );
 }

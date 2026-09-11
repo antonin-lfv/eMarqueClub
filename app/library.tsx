@@ -19,7 +19,15 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { type ClubState, type Player, type Team, uid } from "@/lib/game";
+import {
+  type ClubState,
+  type Player,
+  type Team,
+  uid,
+  updatePlayerInClub,
+  updateTeamInClub,
+  teamColor,
+} from "@/lib/game";
 import { Field, Modal, Picker, Confirm } from "./widgets";
 export type Commit = (s: ClubState, message?: string) => Promise<boolean>;
 export function PlayerForm({
@@ -59,6 +67,10 @@ export function PlayerForm({
           )
         ) {
           toast.error("Ce numéro est déjà utilisé dans cette équipe.");
+          return;
+        }
+        if (!p.license) {
+          toast.error("Renseignez la licence du joueur.");
           return;
         }
         onSave(p);
@@ -101,7 +113,7 @@ export function PlayerForm({
       <Field label="Licence de basketball">
         <Picker
           label="Statut de licence"
-          value={p.license ?? "never"}
+          value={p.license ?? ""}
           onChange={(license) =>
             setP({ ...p, license: license as Player["license"] })
           }
@@ -171,7 +183,11 @@ export function Library({
       undefined,
     ),
     [team, setTeam] = useState<Team | null>(null),
-    [remove, setRemove] = useState<Player | null>(null);
+    [remove, setRemove] = useState<Player | null>(null),
+    [change, setChange] = useState<{
+      player: Player;
+      warnings: string[];
+    } | null>(null);
   const players = state.players.filter(
     (p) =>
       (filter === "all" || p.teamId === filter) &&
@@ -186,7 +202,9 @@ export function Library({
         </div>
         <button
           className="button primary"
-          onClick={() => setTeam({ id: uid(), name: "", short: "" })}
+          onClick={() =>
+            setTeam({ id: uid(), name: "", short: "", color: "#92c5ed" })
+          }
         >
           <Plus size={16} />
           Créer une équipe
@@ -203,7 +221,7 @@ export function Library({
               onClick={() => setFilter(filter === t.id ? "all" : t.id)}
               aria-pressed={filter === t.id}
             >
-              <span className={"library-shield " + (i % 2 ? "coral" : "blue")}>
+              <span className="library-shield" style={{ color: teamColor(t) }}>
                 <Shield />
               </span>
               <div>
@@ -257,9 +275,11 @@ export function Library({
         <Table>
           <TableHeader>
             <TableRow>
-              {["N°", "Joueur", "Équipe", "Plafond hors LF", ""].map((h, i) => (
-                <TableHead key={i}>{h}</TableHead>
-              ))}
+              {["N°", "Joueur", "Équipe", "Licence", "Plafond hors LF", ""].map(
+                (h, i) => (
+                  <TableHead key={i}>{h}</TableHead>
+                ),
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -271,6 +291,15 @@ export function Library({
                 <TableCell>{p.name}</TableCell>
                 <TableCell>
                   {state.teams.find((t) => t.id === p.teamId)?.name}
+                </TableCell>
+                <TableCell>
+                  {p.license === "current"
+                    ? "Actuelle · 3 pts"
+                    : p.license === "former"
+                      ? "Ancienne · 1 pt"
+                      : p.license === "never"
+                        ? "Jamais · 0 pt"
+                        : "À renseigner"}
                 </TableCell>
                 <TableCell>
                   {p.limited ? (
@@ -311,13 +340,14 @@ export function Library({
         )}
       </section>
       <p className="footnote">
-        Les modifications de la base s’appliquent aux prochains matchs. Les
-        feuilles déjà créées conservent leur effectif.
+        Toute la base du tournoi. Les modifications sont répercutées dans les
+        matchs non terminés. Une confirmation est demandée si le score de départ
+        ou le plafond change. Les feuilles terminées restent figées.
       </p>
       {editPlayer !== undefined && (
         <Modal
           title={editPlayer ? "Modifier le joueur" : "Ajouter un joueur"}
-          description="Le joueur sera disponible pour vos prochains matchs."
+          description="Les matchs non terminés sont mis à jour sans effacer leurs actions."
           onClose={() => setEditPlayer(undefined)}
         >
           <PlayerForm
@@ -326,17 +356,12 @@ export function Library({
             teamId={filter === "all" ? undefined : filter}
             busy={busy}
             onSave={async (p) => {
-              if (
-                await commit(
-                  {
-                    ...state,
-                    players: editPlayer
-                      ? state.players.map((x) => (x.id === p.id ? p : x))
-                      : [...state.players, p],
-                  },
-                  "Joueur enregistré",
-                )
-              )
+              const plan = updatePlayerInClub(state, p);
+              if (plan.warnings.length) {
+                setChange({ player: p, warnings: plan.warnings });
+                return;
+              }
+              if (await commit(plan.next, "Joueur mis à jour"))
                 setEditPlayer(undefined);
             }}
           />
@@ -357,12 +382,7 @@ export function Library({
               e.preventDefault();
               if (
                 await commit(
-                  {
-                    ...state,
-                    teams: state.teams.some((t) => t.id === team.id)
-                      ? state.teams.map((t) => (t.id === team.id ? team : t))
-                      : [...state.teams, team],
-                  },
+                  updateTeamInClub(state, team),
                   "Équipe enregistrée",
                 )
               )
@@ -388,6 +408,13 @@ export function Library({
                 }
               />
             </Field>
+            <Field label="Couleur de l’équipe">
+              <input
+                type="color"
+                value={team.color ?? "#92c5ed"}
+                onChange={(e) => setTeam({ ...team, color: e.target.value })}
+              />
+            </Field>
             <div className="form-actions">
               <button disabled={busy} className="button primary">
                 Enregistrer l’équipe
@@ -395,6 +422,21 @@ export function Library({
             </div>
           </form>
         </Modal>
+      )}
+      {change && (
+        <Confirm
+          title="Mettre à jour les matchs en cours ?"
+          description={change.warnings.join(" • ")}
+          onClose={() => setChange(null)}
+          onConfirm={() => {
+            void commit(
+              updatePlayerInClub(state, change.player).next,
+              "Joueur et feuilles mis à jour",
+            );
+            setChange(null);
+            setEditPlayer(undefined);
+          }}
+        />
       )}
       {remove && (
         <Confirm

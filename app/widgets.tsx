@@ -161,13 +161,6 @@ export function RulesEditor({
       max: 30,
     },
     {
-      key: "onCourt",
-      label: "Joueurs sur le terrain",
-      hint: "Pour le 3×3, le 4×4 ou le 5×5",
-      min: 1,
-      max: 5,
-    },
-    {
       key: "foulLimit",
       label: "Fautes avant exclusion",
       hint: "Le joueur ne peut plus marquer une fois exclu",
@@ -177,14 +170,14 @@ export function RulesEditor({
     {
       key: "teamFouls",
       label: "Seuil de fautes d’équipe",
-      hint: "Alerte bonus par période ; prolongations rattachées à la dernière",
+      hint: "Corpo : 2 LF à partir de la 7e faute, après 6 fautes d’équipe",
       min: 1,
       max: 20,
     },
     {
       key: "timeouts",
       label: "Temps morts par équipe",
-      hint: "Quota pour l’ensemble du match",
+      hint: "Quota selon la portée choisie ci-dessous",
       min: 0,
       max: 12,
     },
@@ -228,6 +221,48 @@ export function RulesEditor({
           {error}
         </p>
       )}
+      <div className="form-grid">
+        <Field label="Portée des temps morts">
+          <Picker
+            label="Portée des temps morts"
+            value={draft.timeoutScope ?? "match"}
+            onChange={(v) =>
+              setDraft({ ...draft, timeoutScope: v as Rules["timeoutScope"] })
+            }
+            options={[
+              { value: "period", label: "Par période / mi-temps" },
+              { value: "match", label: "Pour tout le match" },
+            ]}
+          />
+        </Field>
+        <Field label="Chronomètre">
+          <Picker
+            label="Mode chrono"
+            value={draft.clockMode ?? "stopped"}
+            onChange={(v) =>
+              setDraft({ ...draft, clockMode: v as Rules["clockMode"] })
+            }
+            options={[
+              {
+                value: "corpo",
+                label: "Corpo : temps continu, sauf exceptions",
+              },
+              { value: "stopped", label: "Arrêter sur toutes les fautes" },
+            ]}
+          />
+        </Field>
+        <Field label="Joueurs maximum par feuille">
+          <input
+            type="number"
+            min={1}
+            max={30}
+            value={draft.maxRoster ?? 10}
+            onChange={(e) =>
+              setDraft({ ...draft, maxRoster: Number(e.target.value) })
+            }
+          />
+        </Field>
+      </div>
       <div className="form-actions">
         <button disabled={busy} className="button primary" type="submit">
           Enregistrer le règlement

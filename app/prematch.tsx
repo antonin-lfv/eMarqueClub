@@ -1,386 +1,370 @@
 "use client";
 import { useEffect, useState } from "react";
-import {
-  Plus,
-  Shield,
-  Check,
-  ArrowRight,
-  Users,
-  ClipboardList,
-} from "lucide-react";
+import { Plus, Shield, ArrowRight, Trash2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import {
   type ClubState,
   type Team,
   type Player,
   type Official,
-  penaltyPoints,
   prepareMatch,
+  calculateStartingScore,
+  newMatch,
+  teamColor,
   uid,
 } from "@/lib/game";
-import { Field, Picker, Modal } from "./widgets";
-import { PlayerForm } from "./library";
-const licenses = [
-  { value: "never", label: "Jamais · 0 pt" },
-  { value: "former", label: "Ancien · 1 pt" },
-  { value: "current", label: "Actuel · 3 pts" },
-];
+import { Field, Picker, Modal, Confirm } from "./widgets";
+import {
+  OfficialEditor,
+  AddRosterPlayer,
+  defaultOfficials,
+  licenseOptions,
+} from "./people";
 export function Prematch({
   state,
   onStart,
   onCancel,
+  canCancel,
+  onSaveKnown,
 }: {
   state: ClubState;
   onStart: (next: ClubState) => void;
   onCancel: () => void;
+  canCancel: boolean;
+  onSaveKnown: (
+    id: string,
+    values: { number?: number; license?: Player["license"] },
+  ) => void;
 }) {
-  const [title, setTitle] = useState("Match amical"),
-    [teams, setTeams] = useState(state.teams),
-    [players, setPlayers] = useState(state.players),
+  const [teams, setTeams] = useState(state.teams),
     [home, setHome] = useState(state.teams[0]?.id ?? ""),
     [away, setAway] = useState(state.teams[1]?.id ?? ""),
+    [edits, setEdits] = useState<Record<string, Partial<Player>>>({}),
     [absent, setAbsent] = useState<string[]>([]),
-    [starters, setStarters] = useState<Record<string, string[]>>({}),
+    [loans, setLoans] = useState<Player[]>([]),
     [adding, setAdding] = useState<string | null>(null),
-    [teamDraft, setTeamDraft] = useState<Team | null>(null);
-  const [officials, setOfficials] = useState<Official[]>(
-      ["Marqueur", "Chronométreur", "Arbitre"].map((role) => ({
-        id: uid(),
-        name: "",
-        role: role as Official["role"],
-        playerId: null,
-      })),
-    ),
-    [sources, setSources] = useState<Record<number, string>>({});
-  useEffect(() => {
-    setTeams((current) => [
-      ...current,
-      ...state.teams.filter((t) => !current.some((x) => x.id === t.id)),
-    ]);
-    setPlayers((current) => [
-      ...current,
-      ...state.players.filter((p) => !current.some((x) => x.id === p.id)),
-    ]);
-  }, [state.teams, state.players]);
-  const roster = (teamId: string) =>
-    players.filter((p) => p.teamId === teamId && !absent.includes(p.id));
-  const selected = players.filter(
-    (p) => (p.teamId === home || p.teamId === away) && !absent.includes(p.id),
+    [teamDraft, setTeamDraft] = useState<Team | null>(null),
+    [officials, setOfficials] = useState<Official[]>(defaultOfficials),
+    [stage, setStage] = useState<"pool" | "final">("pool"),
+    [agreement, setAgreement] = useState({ home: false, away: false }),
+    [pendingTeam, setPendingTeam] = useState<{
+      side: "home" | "away";
+      id: string;
+    } | null>(null),
+    [confirmStart, setConfirmStart] = useState<ClubState | null>(null);
+  useEffect(
+    () =>
+      setTeams((current) => [
+        ...state.teams,
+        ...current.filter((t) => !state.teams.some((x) => x.id === t.id)),
+      ]),
+    [state.teams],
   );
-  const initial = (teamId: string) => {
-    const ids = roster(teamId).map((p) => p.id);
-    const saved = starters[teamId] ?? ids.slice(0, state.rules.onCourt);
-    return saved.filter((id) => ids.includes(id));
-  };
-  const penalty = (teamId: string) =>
-    roster(teamId).reduce((n, p) => n + penaltyPoints(p), 0);
-  const a = penalty(home),
-    b = penalty(away);
-  const setPlayer = (id: string, change: Partial<Player>) =>
-    setPlayers((current) =>
-      current.map((p) => (p.id === id ? { ...p, ...change } : p)),
-    );
-  function presence(p: Player, checked: boolean) {
-    setAbsent((current) =>
-      checked ? current.filter((id) => id !== p.id) : [...current, p.id],
-    );
-    setStarters((current) => {
-      let list = initial(p.teamId).filter((id) => id !== p.id);
-      if (checked && list.length < state.rules.onCourt) list = [...list, p.id];
-      if (!checked) {
-        const replacement = roster(p.teamId).find(
-          (j) => j.id !== p.id && !list.includes(j.id),
-        );
-        if (replacement && list.length < state.rules.onCourt)
-          list.push(replacement.id);
-      }
-      return { ...current, [p.teamId]: list };
-    });
+  const base = state.players.map((p) => ({
+    ...p,
+    ...edits[p.id],
+    license: p.license ?? edits[p.id]?.license,
+  }));
+  const own = base.filter(
+    (p) =>
+      (p.teamId === home || p.teamId === away) &&
+      !loans.some((l) => l.id === p.id),
+  );
+  const all = [
+    ...own,
+    ...loans
+      .filter((p) => p.teamId === home || p.teamId === away)
+      .map((p) => {
+        const original = state.players.find((j) => j.id === p.id);
+        return original
+          ? {
+              ...p,
+              name: original.name,
+              license: original.license ?? p.license,
+              limited: original.limited,
+              cap: original.cap,
+              sourceTeamId: original.teamId,
+            }
+          : p;
+      }),
+  ];
+  const selected = all.filter((p) => !absent.includes(p.id));
+  const h = teams.find((t) => t.id === home),
+    a = teams.find((t) => t.id === away);
+  const provisional =
+    h && a && h.id !== a.id
+      ? { ...newMatch("", h, a, selected, state.rules), stage }
+      : null;
+  const opening = provisional
+    ? calculateStartingScore(provisional)
+    : { home: 0, away: 0 };
+  function pickTeam(side: "home" | "away", id: string) {
+    if (id === (side === "home" ? away : home)) {
+      toast.error("Choisissez deux équipes différentes.");
+      return;
+    }
+    if (!(side === "home" ? home : away)) {
+      side === "home" ? setHome(id) : setAway(id);
+      return;
+    }
+    setPendingTeam({ side, id });
   }
-  function teamPanel(teamId: string, side: string) {
-    const team = teams.find((t) => t.id === teamId);
+  function teamPanel(teamId: string, side: "home" | "away") {
+    const team = teams.find((t) => t.id === teamId),
+      ps = all.filter((p) => p.teamId === teamId),
+      present = selected.filter((p) => p.teamId === teamId),
+      borrowed = present.filter(
+        (p) => p.sourceTeamId && p.sourceTeamId !== p.teamId,
+      );
     return (
-      <section className={"prematch-team " + side}>
+      <section
+        className="prematch-team"
+        style={{
+          color: team
+            ? teamColor(team, side === "home" ? "#92c5ed" : "#f2a58c")
+            : undefined,
+        }}
+      >
         <header>
-          <Shield size={21} />
+          <Shield />
           <h2>{team?.name ?? "Choisir une équipe"}</h2>
           <span>
-            {roster(teamId).length} présents · {penalty(teamId)} pts
+            {present.length}/{state.rules.maxRoster ?? 10} présents
           </span>
         </header>
         <div className="attendance-head">
           <span>Présent / joueur</span>
           <span>Maillot</span>
           <span>Licence</span>
-          <span>Départ</span>
         </div>
-        {players
-          .filter((p) => p.teamId === teamId)
-          .map((p) => {
-            const present = !absent.includes(p.id);
-            return (
-              <div
-                className={"attendance-row " + (!present ? "absent" : "")}
-                key={p.id}
-              >
-                <label className="attendance-name">
-                  <Checkbox
-                    checked={present}
-                    onCheckedChange={(checked) => presence(p, checked === true)}
-                    aria-label={`${p.name} présent`}
-                  />
-                  <span>
-                    {p.name}
-                    {p.limited && (
-                      <small>
-                        Plafond {p.cap ?? state.rules.pointCap} hors LF
-                      </small>
-                    )}
-                  </span>
-                </label>
-                <input
-                  className="jersey-input"
-                  aria-label={`Maillot de ${p.name}`}
-                  type="number"
-                  min={0}
-                  max={99}
-                  placeholder="N°"
-                  value={p.number ?? ""}
-                  onChange={(e) =>
-                    setPlayer(p.id, {
-                      number:
-                        e.target.value === "" ? null : Number(e.target.value),
-                    })
+        {ps.map((p) => {
+          const original = state.players.find((j) => j.id === p.id);
+          return (
+            <div
+              key={p.id}
+              className={
+                "attendance-row " + (absent.includes(p.id) ? "absent" : "")
+              }
+            >
+              <label className="attendance-name">
+                <Checkbox
+                  checked={!absent.includes(p.id)}
+                  onCheckedChange={(v) =>
+                    setAbsent((old) =>
+                      v === true
+                        ? old.filter((id) => id !== p.id)
+                        : [...old, p.id],
+                    )
                   }
                 />
+                <span>
+                  {p.name}
+                  {p.sourceTeamId && p.sourceTeamId !== p.teamId && (
+                    <small>
+                      Renfort ·{" "}
+                      {teams.find((t) => t.id === p.sourceTeamId)?.name}
+                    </small>
+                  )}
+                </span>
+              </label>
+              <input
+                className="jersey-input"
+                aria-label={`Maillot ${p.name}`}
+                type="number"
+                min={0}
+                max={99}
+                placeholder="N°"
+                value={p.number ?? ""}
+                onChange={(e) => {
+                  const number =
+                    e.target.value === "" ? null : Number(e.target.value);
+                  if (loans.some((l) => l.id === p.id))
+                    setLoans((ls) =>
+                      ls.map((l) => (l.id === p.id ? { ...l, number } : l)),
+                    );
+                  else
+                    setEdits((x) => ({ ...x, [p.id]: { ...x[p.id], number } }));
+                }}
+                onBlur={() => {
+                  if (
+                    original?.number == null &&
+                    p.number !== null &&
+                    Number.isInteger(p.number) &&
+                    p.number >= 0 &&
+                    p.number <= 99
+                  )
+                    onSaveKnown(p.id, { number: p.number });
+                }}
+              />
+              {original?.license ? (
+                <span className="known-value">
+                  {
+                    licenseOptions.find((l) => l.value === original.license)
+                      ?.label
+                  }
+                </span>
+              ) : (
                 <Picker
-                  label={`Licence de ${p.name}`}
-                  value={p.license ?? "never"}
-                  onChange={(license) =>
-                    setPlayer(p.id, { license: license as Player["license"] })
-                  }
-                  options={licenses}
+                  label={`Licence ${p.name}`}
+                  value={p.license ?? ""}
+                  onChange={(v) => {
+                    const license = v as Player["license"];
+                    if (original) onSaveKnown(p.id, { license });
+                    if (loans.some((l) => l.id === p.id))
+                      setLoans((ls) =>
+                        ls.map((l) => (l.id === p.id ? { ...l, license } : l)),
+                      );
+                    else
+                      setEdits((x) => ({
+                        ...x,
+                        [p.id]: { ...x[p.id], license },
+                      }));
+                  }}
+                  options={licenseOptions}
                 />
-                <button
-                  type="button"
-                  className={
-                    "starter-toggle " +
-                    (initial(teamId).includes(p.id) ? "active" : "")
-                  }
-                  disabled={!present}
-                  aria-label={`${p.name} titulaire`}
-                  aria-pressed={initial(teamId).includes(p.id)}
-                  onClick={() =>
-                    setStarters((current) => ({
-                      ...current,
-                      [teamId]: initial(teamId).includes(p.id)
-                        ? initial(teamId).filter((id) => id !== p.id)
-                        : [...initial(teamId), p.id],
-                    }))
-                  }
-                >
-                  <Check size={16} />
-                </button>
-              </div>
-            );
-          })}
+              )}
+            </div>
+          );
+        })}
         <div className="attendance-footer">
           <button
             className="text-button"
-            onClick={() => setAdding(teamId)}
             disabled={!team}
+            onClick={() => setAdding(teamId)}
           >
             <Plus size={15} />
-            Ajouter un joueur
+            Compléter depuis la base
           </button>
-          <span>
-            {initial(teamId).length}/
-            {Math.min(state.rules.onCourt, roster(teamId).length)} titulaires
-          </span>
+          <span>{borrowed.length} / 2 renforts</span>
         </div>
+        {(borrowed.length > 0 || present.length < 5) && (
+          <label className="agreement">
+            <Checkbox
+              checked={agreement[side]}
+              onCheckedChange={(v) =>
+                setAgreement((x) => ({ ...x, [side]: v === true }))
+              }
+            />
+            <span>
+              L’adversaire accepte de valider le score malgré l’effectif
+              incomplet / les renforts.
+              <small>
+                Sans accord : équipe perdante selon l’article 10. Aucun score ne
+                sera remplacé automatiquement.
+              </small>
+            </span>
+          </label>
+        )}
       </section>
     );
+  }
+  function launch() {
+    try {
+      if (!h || !a) throw Error("Choisissez les deux équipes.");
+      if (selected.some((p) => !p.license))
+        throw Error("Renseignez la licence de chaque joueur présent.");
+      const next = prepareMatch(
+        { ...state, teams },
+        "",
+        h,
+        a,
+        selected,
+        officials,
+        [],
+        { stage, agreement },
+      );
+      const incomplete =
+        selected.filter((p) => p.teamId === home).length < 5 ||
+        selected.filter((p) => p.teamId === away).length < 5 ||
+        selected.some((p) => p.sourceTeamId && p.sourceTeamId !== p.teamId);
+      if (incomplete) setConfirmStart(next);
+      else onStart(next);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
   }
   return (
     <div className="prematch">
       <div className="section-heading">
         <div>
-          <h2>Tout est prêt avant l’entre-deux.</h2>
-          <p>
-            Cochez les présents, vérifiez les maillots et attribuez les postes.
-          </p>
+          <h2>Avant-match</h2>
+          <p>Présents, maillots, licences et officiels.</p>
         </div>
-        <button className="button secondary" onClick={onCancel}>
-          Retour au match
-        </button>
+        {canCancel && (
+          <button className="button secondary" onClick={onCancel}>
+            Retour au match
+          </button>
+        )}
       </div>
       <section className="panel setup-meta">
-        <Field label="Nom du match">
-          <input
-            value={title}
-            maxLength={90}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </Field>
         <Field label="Domicile">
           <Picker
-            label="Équipe à domicile"
+            label="Domicile"
             value={home}
-            onChange={setHome}
+            onChange={(id) => pickTeam("home", id)}
             options={teams.map((t) => ({ value: t.id, label: t.name }))}
           />
         </Field>
         <Field label="Extérieur">
           <Picker
-            label="Équipe à l’extérieur"
+            label="Extérieur"
             value={away}
-            onChange={setAway}
+            onChange={(id) => pickTeam("away", id)}
             options={teams.map((t) => ({ value: t.id, label: t.name }))}
+          />
+        </Field>
+        <Field label="Phase">
+          <Picker
+            label="Phase du tournoi"
+            value={stage}
+            onChange={(v) => setStage(v as typeof stage)}
+            options={[
+              { value: "pool", label: "Poules · pénalités activées" },
+              { value: "final", label: "Phase finale · sans pénalités" },
+            ]}
           />
         </Field>
         <button
           className="button secondary"
-          onClick={() => setTeamDraft({ id: uid(), name: "", short: "" })}
+          onClick={() =>
+            setTeamDraft({ id: uid(), name: "", short: "", color: "#92c5ed" })
+          }
         >
-          <Plus size={16} />
+          <Plus size={15} />
           Équipe
         </button>
       </section>
       <div className="setup-teams">
-        {teamPanel(home, "blue")}
-        {teamPanel(away, "coral")}
+        {teamPanel(home, "home")}
+        {teamPanel(away, "away")}
       </div>
       <p className="footnote">
-        Les numéros et statuts renseignés pour les joueurs présents sont
-        mémorisés pour les prochains matchs. « Départ » indique les joueurs sur
-        le terrain à l’entre-deux.
+        Les maillots et licences manquants sont mémorisés dès leur première
+        saisie. Les informations déjà enregistrées restent en base ; un autre
+        maillot peut être utilisé uniquement pour cette rencontre. Pour corriger
+        une licence existante, ouvrez la fiche du joueur dans la base.
       </p>
-      <section className="panel officials-setup">
-        <div className="section-heading">
-          <div>
-            <h2>La table et les arbitres</h2>
-            <p>Deux personnes à la table · Un ou deux arbitres</p>
-          </div>
-          <label className="second-referee">
-            <Switch
-              checked={officials.length === 4}
-              onCheckedChange={(checked) =>
-                setOfficials((o) =>
-                  checked
-                    ? [
-                        ...o,
-                        {
-                          id: uid(),
-                          name: "",
-                          role: "Arbitre",
-                          playerId: null,
-                        },
-                      ]
-                    : o.slice(0, 3),
-                )
-              }
-              aria-label="Deuxième arbitre"
-            />
-            Deuxième arbitre
-          </label>
-        </div>
-        <div className="official-slots">
-          {officials.map((o, index) => {
-            const people = [
-              ...state.officials
-                .filter(
-                  (saved) =>
-                    !saved.playerId ||
-                    !selected.some((p) => p.id === saved.playerId),
-                )
-                .map((saved) => ({
-                  value: "official:" + saved.id,
-                  label: saved.name,
-                  name: saved.name,
-                  playerId: saved.playerId,
-                  id: saved.id,
-                })),
-              ...players
-                .filter((p) => !selected.some((j) => j.id === p.id))
-                .map((p) => ({
-                  value: "player:" + p.id,
-                  label:
-                    p.name +
-                    " · " +
-                    (teams.find((t) => t.id === p.teamId)?.name ?? "Joueur"),
-                  name: p.name,
-                  playerId: p.id,
-                  id:
-                    state.officials.find((o) => o.playerId === p.id)?.id ??
-                    uid(),
-                })),
-            ];
-            return (
-              <div className="official-slot" key={index}>
-                <h3>
-                  {index === 0
-                    ? "01 · Marqueur"
-                    : index === 1
-                      ? "02 · Chronométreur"
-                      : `${index - 1 === 1 ? "01" : "02"} · Arbitre`}
-                </h3>
-                <Picker
-                  label={`Choisir ${o.role} ${index}`}
-                  value={sources[index] ?? "new"}
-                  onChange={(value) => {
-                    setSources((s) => ({ ...s, [index]: value }));
-                    const person = people.find((p) => p.value === value);
-                    setOfficials((all) =>
-                      all.map((o, i) =>
-                        i === index
-                          ? {
-                              ...o,
-                              id: person?.id ?? uid(),
-                              name: person?.name ?? "",
-                              playerId: person?.playerId ?? null,
-                            }
-                          : o,
-                      ),
-                    );
-                  }}
-                  options={[
-                    { value: "new", label: "Saisir un nom" },
-                    ...people,
-                  ]}
-                />
-                {(!sources[index] || sources[index] === "new") && (
-                  <input
-                    className="official-name"
-                    aria-label={`Nom ${o.role} ${index}`}
-                    placeholder="Nom et prénom"
-                    maxLength={90}
-                    value={o.name}
-                    onChange={(e) =>
-                      setOfficials((all) =>
-                        all.map((o, i) =>
-                          i === index ? { ...o, name: e.target.value } : o,
-                        ),
-                      )
-                    }
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
+      <OfficialEditor
+        state={{ ...state, teams }}
+        players={selected}
+        officials={officials}
+        onChange={setOfficials}
+      />
       <section className="setup-launch">
         <div className="opening-score">
           <span>Score de départ</span>
           <strong>
-            <span className="blue">{Math.max(0, b - a)}</span>
+            <span style={{ color: h && teamColor(h) }}>{opening.home}</span>
             <em>–</em>
-            <span className="coral">{Math.max(0, a - b)}</span>
+            <span style={{ color: a && teamColor(a, "#f2a58c") }}>
+              {opening.away}
+            </span>
           </strong>
           <small>
-            {a} pts de pénalité contre {b} · Écart compensé
+            {stage === "pool"
+              ? "Pénalités compensées entre les présents"
+              : "Pas de pénalités en phase finale"}
           </small>
         </div>
         <div className="launch-detail">
@@ -388,78 +372,52 @@ export function Prematch({
             {state.rules.periods} × {state.rules.minutes} minutes
           </b>
           <span>
-            {selected.length} joueurs présents · {officials.length} officiels
+            {selected.length} présents · {officials.length} officiels
           </span>
         </div>
-        <button
-          className="button primary"
-          onClick={() => {
-            try {
-              if (!title.trim()) throw Error("Donnez un nom au match.");
-              const h = teams.find((t) => t.id === home),
-                a = teams.find((t) => t.id === away);
-              if (!h || !a) throw Error("Choisissez deux équipes.");
-              onStart(
-                prepareMatch(
-                  { ...state, teams },
-                  title,
-                  h,
-                  a,
-                  selected,
-                  officials,
-                  [...initial(home), ...initial(away)],
-                ),
-              );
-            } catch (e) {
-              toast.error((e as Error).message);
-            }
-          }}
-        >
+        <button className="button primary" onClick={launch}>
           Ouvrir la table de marque
           <ArrowRight size={18} />
         </button>
       </section>
-      {adding && (
-        <Modal
-          title="Ajouter un joueur"
-          description="Il sera présent au match et enregistré dans la base au lancement."
+      {adding && teams.find((t) => t.id === adding) && (
+        <AddRosterPlayer
+          state={{ ...state, teams }}
+          team={teams.find((t) => t.id === adding)!}
+          roster={selected}
+          officials={officials}
           onClose={() => setAdding(null)}
-        >
-          <PlayerForm
-            state={{
-              ...state,
-              teams: teams.filter((t) => t.id === adding),
-              players,
-            }}
-            teamId={adding}
-            busy={false}
-            onSave={(p) => {
-              setPlayers((all) => [...all, p]);
-              setAdding(null);
-            }}
-          />
-        </Modal>
+          onSave={(p) => {
+            if (all.some((j) => j.id === p.id) && !absent.includes(p.id)) {
+              toast.error("Ce joueur est déjà présent.");
+              return;
+            }
+            setLoans((ls) => [...ls.filter((l) => l.id !== p.id), p]);
+            setAbsent((ids) => ids.filter((id) => id !== p.id));
+            setAdding(null);
+          }}
+        />
       )}
       {teamDraft && (
         <Modal
           title="Créer une équipe"
-          description="Elle sera enregistrée avec la préparation du match."
+          description="Choisissez son nom et sa couleur."
           onClose={() => setTeamDraft(null)}
         >
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              setTeams((t) => [...t, teamDraft]);
+              setTeams((ts) => [...ts, teamDraft]);
               if (!home) setHome(teamDraft.id);
-              else setAway(teamDraft.id);
+              else if (!away) setAway(teamDraft.id);
               setTeamDraft(null);
             }}
           >
             <Field label="Nom">
               <input
                 required
-                maxLength={90}
                 value={teamDraft.name}
+                maxLength={90}
                 onChange={(e) =>
                   setTeamDraft({ ...teamDraft, name: e.target.value })
                 }
@@ -478,9 +436,43 @@ export function Prematch({
                 }
               />
             </Field>
-            <button className="button primary">Ajouter l’équipe</button>
+            <Field label="Couleur">
+              <input
+                type="color"
+                value={teamDraft.color}
+                onChange={(e) =>
+                  setTeamDraft({ ...teamDraft, color: e.target.value })
+                }
+              />
+            </Field>
+            <button className="button primary">Créer</button>
           </form>
         </Modal>
+      )}
+      {pendingTeam && (
+        <Confirm
+          title="Changer l’équipe de cette préparation ?"
+          description="Les sélections de l’équipe remplacée seront écartées de cette préparation. Aucun match enregistré, score ou chronomètre ne sera remis à zéro."
+          onClose={() => setPendingTeam(null)}
+          onConfirm={() => {
+            pendingTeam.side === "home"
+              ? setHome(pendingTeam.id)
+              : setAway(pendingTeam.id);
+            setAgreement((x) => ({ ...x, [pendingTeam.side]: false }));
+            setPendingTeam(null);
+          }}
+        />
+      )}
+      {confirmStart && (
+        <Confirm
+          title="Confirmer l’effectif incomplet / les renforts"
+          description="Vérifiez l’accord adverse. Sans cet accord, l’équipe incomplète est déclarée perdante par le règlement ; l’organisateur devra traiter le résultat. Le score joué sera conservé."
+          onClose={() => setConfirmStart(null)}
+          onConfirm={() => {
+            onStart(confirmStart);
+            setConfirmStart(null);
+          }}
+        />
       )}
     </div>
   );
