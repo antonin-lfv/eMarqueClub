@@ -1,41 +1,120 @@
-# eMarque Club
+<p align="center">
+  <img src="public/favicon.svg" alt="eMarque Club" width="72">
+</p>
 
-Table de marque pour les tournois internes et corpo. Application indépendante du logiciel officiel.
+<h1 align="center">eMarque Club</h1>
 
-## Utilisation
+<h4 align="center">Table de marque pour les tournois internes et corpo · indépendante du logiciel officiel.</h4>
 
-« Équipes et joueurs » contient toute la base du tournoi, avec couleurs d’équipes, maillots, licences et plafonds individuels. Les statistiques s’ouvrent depuis la table de marque et concernent la rencontre sélectionnée. La base générale se trouve à droite de la navigation.
+<p align="center">
+  <img src="https://img.shields.io/badge/Next.js-16-black.svg" alt="Next.js">
+  <img src="https://img.shields.io/badge/React-19-blue.svg" alt="React">
+  <img src="https://img.shields.io/badge/TypeScript-5.9-blue.svg" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Cloudflare-Workers%20%2B%20D1-orange.svg" alt="Cloudflare">
+  <img src="https://img.shields.io/badge/Node.js-22.13+-green.svg" alt="Node.js">
+</p>
 
-L’avant-match sélectionne les équipes, les présents, les renforts et les officiels. Après lancement, il affiche une explication : les officiels et renforts se modifient depuis la table, les joueurs depuis la base. La couleur de maillot est choisie pour chaque match dans l’avant-match. Les équipes engagées et le règlement restent ceux du lancement ; les nouveaux réglages s’appliquent aux prochains matchs. Les numéros et licences manquants sont mémorisés lors de leur première saisie ; les valeurs déjà en base sont conservées. Un maillot différent peut être utilisé pour une rencontre. Les renforts restent rattachés à leur équipe d’origine. Deux arbitres sont proposés par défaut, avec un marqueur et un chronométreur ; chaque personne est choisie dans les joueurs avec recherche par équipe et nom, ou saisie à la volée. Une personne ne peut occuper deux postes ni jouer et officier sur la même feuille.
+<p align="center">
+  <a href="#-à-quoi-ça-sert">À quoi ça sert</a> •
+  <a href="#-fonctionnalités">Fonctionnalités</a> •
+  <a href="#-sauvegarde">Sauvegarde</a> •
+  <a href="#-installation">Installation</a> •
+  <a href="#️-stack">Stack</a>
+</p>
 
-Tous les joueurs présents peuvent marquer. Sélectionner le joueur puis cliquer sur le terrain ajoute immédiatement un panier à 2 ou 3 points. Aucun tir raté, pourcentage de réussite, titulaire ou remplacement n’est demandé. Annuler corrige la dernière action sans confirmation. Les lancers francs et fautes personnelles sont directs.
+## Aperçu
 
-Les boutons ±1 s, ±10 s et ±1 min corrigent le chrono sans changer son état de marche ; cliquer sur le chrono permet une correction exacte en pause. Les temps morts pris sont visibles dans le panneau de score. La clôture demande un message et des remarques facultatifs avant confirmation. La confirmation de fin archive le résultat et les remarques, arrête le chrono et libère automatiquement la table. Aucune réouverture n’est proposée. Les statistiques des feuilles terminées restent accessibles depuis la table vide.
+<p align="center">
+  <img src="images/table-marque.png" alt="Table de marque en direct" width="100%">
+</p>
 
-Les corrections de joueurs et d’identité d’équipe se répercutent dans les matchs non terminés. Les couleurs de maillot choisies à l’avant-match restent propres à la feuille et ne sont jamais écrasées par une modification de la couleur en base. Les changements de licence, de plafond, de maillot ou d’équipe ayant des conséquences demandent une confirmation explicative. Les collisions de maillots conservent le numéro du match. Un renfort ajouté en cours de match conserve les actions, le chrono et l’équipe d’origine ; le score de départ est recalculé après confirmation. Les feuilles terminées restent figées.
+---
 
-Aucun match de démonstration n’est créé. L’ancienne feuille identifiée `demo` est retirée lors de la lecture ou de l’écriture ; les autres matchs et la base restent conservés. « Réinitialiser la table » demande confirmation puis supprime uniquement la feuille ouverte, ses actions et son chrono. La base et les résultats terminés sont conservés. Terminer un match archive sa feuille et libère la table. Recommencer une préparation demande confirmation. Une rencontre ouverte doit être terminée ou réinitialisée avant la préparation suivante.
+## 🏀 À quoi ça sert
 
-## Règlement
+eMarque Club sert de table de marque pour des tournois internes et corpo de basket : préparation de la rencontre, saisie du score en direct, chrono, fautes et temps morts, puis statistiques une fois le match terminé. Elle est volontairement indépendante du logiciel officiel de la fédération.
 
-Voir `REGLEMENT_CORPO_2025.md` pour le rapprochement avec le PDF fourni. Le préréglage Corpo 2025 est proposé pour les futurs matchs ; les règles des feuilles déjà créées restent conservées.
+« Équipes et joueurs » contient toute la base du tournoi : couleurs d'équipes, maillots, licences et plafonds individuels. La base est réutilisable d'un match à l'autre ; les statistiques, elles, se consultent match par match depuis la table de marque.
 
-Pénalités en poules : jamais licencié 0, ancien licencié 1, licencié actuel 3, plus l’éventuel point de nouvel arrivant sur ce match. Les présents comptent et les totaux se compensent : 4 contre 7 donne 3–0 au premier côté. Aucun handicap en phase finale. Ces points n’entrent pas dans les statistiques ou plafonds individuels.
+---
 
-## Sauvegarde
+## ✨ Fonctionnalités
 
-L’affichage est immédiat. La file d’enregistrement regroupe les saisies rapides, sérialise les requêtes et conserve les annulations. Les identifiants de mutation permettent de retenter une réponse perdue sans doublon. Les révisions empêchent un écrasement concurrent. D1 est la base durable ; `sessionStorage` garde une copie temporaire des actions non confirmées dans le même onglet. Une panne ou un conflit conserve la copie locale et propose une exportation de secours. Garder l’onglet ouvert jusqu’à confirmation d’enregistrement. Utiliser une table de saisie à la fois.
+### 📋 Avant-match
 
-## Développement et validation
+<p align="center">
+  <img src="images/avant-match.png" alt="Avant-match" width="700">
+</p>
 
-Node.js ≥ 22.13. Installation : `npm run install:ci`. Développement : `npm run dev`, port 5173. Les migrations D1 locales sont dans `drizzle/` et utilisent `.wrangler/state`.
+Sélection des équipes, des présents, des renforts et des officiels avant chaque rencontre. Couleur de maillot choisie par match, deux arbitres proposés par défaut avec marqueur et chronométreur : chaque poste se cherche dans les joueurs ou se saisit à la volée. Une personne ne peut occuper deux postes ni jouer et officier sur la même feuille.
 
-`npm test` couvre les règles, prêts, conservation des matchs, synchronisation, chrono et file de sauvegarde. `npm run typecheck` vérifie les types. La compilation Sites produit le Worker et les ressources du client. L’API locale est vérifiée par lecture/écriture, idempotence, conflits et validation. Aucune vérification par clics dans le navigateur n’a été effectuée.
+### 👥 Équipes et joueurs
 
-La lecture WebMCP facultative `read_basketball_match` expose la feuille sélectionnée quand cette API est disponible. L’API de production exige l’identité injectée par Sites ; l’accès reste privé.
+<p align="center">
+  <img src="images/equipes-joueurs.png" alt="Équipes et joueurs" width="700">
+</p>
 
-L’équipe fictive « Les Lynx — test » et ses huit joueurs sont ajoutés une seule fois à la base existante lors de cette mise à jour. Aucun match de démonstration n’est créé. Les données existantes restent conservées.
+Une base de tournoi réutilisable : équipes, effectifs, licences et plafonds individuels. Les corrections de joueurs et d'identité d'équipe se répercutent automatiquement dans les matchs non terminés, sans jamais écraser les couleurs de maillot déjà choisies à l'avant-match.
 
-L’avant-match présente deux cartes d’équipes, leur couleur, une palette de maillots et un sélecteur de couleur libre. La date locale du jour et l’heure actuelle sont préremplies, modifiables, puis conservées comme horaire prévu distinct de la date technique de création. L’horaire est affiché dans la table et les statistiques. Le thème clair/sombre se choisit dans l’en-tête et reste mémorisé localement sur l’appareil.
+### 🏀 Marquage en direct
 
-La date, l’heure et la phase sont regroupées au-dessus des équipes dans l’avant-match. L’inversion des côtés déplace ensemble les scores, listes de joueurs, couleurs, compteurs de fautes et temps morts. La mi-temps applique automatiquement la même orientation : P1→P2 en deux périodes, P2→P3 en quatre périodes. Les prolongations gardent les côtés de la seconde mi-temps. Les identités domicile/extérieur et les actions enregistrées restent attachées aux bonnes équipes.
+<p align="center">
+  <img src="images/terrain.png" alt="Terrain et fil du match" width="700">
+</p>
+
+Sélectionner un joueur puis cliquer sur le terrain ajoute immédiatement un panier à 2 ou 3 points, avec la position du tir mémorisée pour les statistiques. Lancers francs et fautes personnelles sont directs. Le chrono se corrige par ±1&nbsp;s / ±10&nbsp;s / ±1&nbsp;min sans changer son état de marche, et « Annuler » revient sur la dernière action sans confirmation.
+
+### 📊 Statistiques
+
+<p align="center">
+  <img src="images/statistiques.png" alt="Statistiques du match" width="700">
+</p>
+
+Carte des tirs, score par période, filtres par équipe / joueur / période et export CSV. Les statistiques des feuilles terminées restent accessibles depuis une table vide, sans réouverture possible du match.
+
+---
+
+## 💾 Sauvegarde
+
+L'affichage est immédiat, la sauvegarde suit derrière : une file d'enregistrement regroupe les saisies rapides, sérialise les requêtes et conserve les annulations, avec des identifiants de mutation pour retenter une réponse perdue sans doublon.
+
+- **D1** (Cloudflare) est la base durable.
+- **`sessionStorage`** garde une copie temporaire des actions non confirmées dans l'onglet.
+- Une panne ou un conflit conserve la copie locale et propose une exportation de secours.
+
+> [!NOTE]
+> Garder l'onglet ouvert jusqu'à confirmation d'enregistrement, et utiliser une seule table de saisie à la fois.
+
+---
+
+## 🚀 Installation
+
+**Prérequis : Node.js ≥ 22.13.**
+
+```bash
+git clone https://github.com/antonin-lfv/eMarqueClub.git
+cd eMarqueClub
+npm run install:ci
+npm run dev
+```
+
+L'application tourne sur [http://localhost:5173](http://localhost:5173). Les migrations D1 locales sont dans `drizzle/` et utilisent `.wrangler/state`.
+
+### Tests et validation
+
+```bash
+npm test        # règles, prêts, conservation des matchs, synchronisation, chrono, file de sauvegarde
+npm run typecheck
+```
+
+---
+
+## 🛠️ Stack
+
+| | |
+|---|---|
+| **Framework** | Next.js 16 · React 19 · TypeScript |
+| **UI** | Tailwind CSS · Radix UI · shadcn |
+| **Hébergement** | Cloudflare Workers |
+| **Base de données** | Cloudflare D1 · Drizzle ORM |
+| **Build / dev** | Vite · vinext · Wrangler |
